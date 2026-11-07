@@ -54,9 +54,10 @@ Step 'Signing in'
 if (-not (Get-AzContext)) { Connect-AzAccount -Tenant $TenantId | Out-Null }
 $ctx = Get-AzContext
 if (-not $TenantId) { $TenantId = $ctx.Tenant.Id }
-Connect-MgGraph -TenantId $TenantId -NoWelcome -Scopes @(
-  'Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All', 'Group.Read.All', 'Sites.FullControl.All'
-)
+$graphScopes = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All', 'Group.Read.All', 'Sites.FullControl.All')
+$inCloudShell = "$env:AZUREPS_HOST_ENVIRONMENT" -like 'cloud-shell*' -or [bool]$env:ACC_CLOUD
+if ($inCloudShell) { Connect-MgGraph -TenantId $TenantId -NoWelcome -Scopes $graphScopes -UseDeviceCode }
+else { Connect-MgGraph -TenantId $TenantId -NoWelcome -Scopes $graphScopes }
 Ok "Tenant $TenantId, subscription $($ctx.Subscription.Name)"
 
 $web = Get-AzWebApp -ResourceGroupName $ResourceGroup -Name $WebAppName
