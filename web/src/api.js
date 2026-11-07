@@ -20,6 +20,11 @@ export async function loadConfig() {
 }
 
 export const getConfig = () => config;
+// Re-reads the settings an admin can change (categories, capture policy) without signing in again.
+export async function refreshConfig() {
+  try { const fresh = await (await fetch('/api/config', { cache: 'no-store' })).json(); Object.assign(config, fresh); } catch { /* keep the cached copy */ }
+  return config;
+}
 export const devUser = () => { try { return localStorage.getItem('pda.devUser') || config?.devUsers?.[2]?.id; } catch { return config?.devUsers?.[2]?.id; } };
 export const setDevUser = (id) => { try { localStorage.setItem('pda.devUser', id); } catch { /* ignore */ } };
 

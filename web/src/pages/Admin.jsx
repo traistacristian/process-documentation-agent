@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api.js';
+import { api, refreshConfig } from '../api.js';
 import { fmtDate } from '../util.jsx';
 
 const lines = (a) => (a || []).join('\n');
@@ -22,7 +22,7 @@ export default function Admin() {
     setErr(null); setMsg(null);
     try {
       await api('/api/admin/settings', { method: 'PUT', body: { categories: parse(f.categories), capture: { excludedApps: parse(f.excludedApps), excludedUrlPatterns: parse(f.excludedUrlPatterns), sensitiveFieldPatterns: parse(f.sensitiveFieldPatterns), captureFreeTextValues: f.captureFreeTextValues, screenshotOnClick: f.screenshotOnClick }, retention: { rawCaptureDays: Number(f.rawCaptureDays), purgeRawAfterPublish: f.purgeRawAfterPublish }, notifications: { webhookUrl: f.webhookUrl.trim() } } });
-      setMsg('Settings saved. Capture clients pick up policy changes when they next pair.'); load();
+      setMsg('Settings saved. New categories are available right away; capture clients pick up policy changes when they next pair.'); load(); refreshConfig();
     } catch (e) { setErr(e.message); }
   };
   const provision = async () => { setErr(null); try { const r = await api('/api/admin/repository/provision', { method: 'POST' }); setMsg(r.message || 'Repository columns and category folders are in place.'); } catch (e) { setErr(e.message); } };

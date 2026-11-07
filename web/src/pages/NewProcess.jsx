@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { api, getConfig } from '../api.js';
+import { api, getConfig, refreshConfig } from '../api.js';
 import { go } from '../util.jsx';
 import Consent from '../components/Consent.jsx';
 
 export default function NewProcess({ me }) {
-  const cfg = getConfig();
+  const [cfg, setCfg] = useState(getConfig());
+  // Categories can be changed by an admin at any time: always show the current list.
+  useEffect(() => { refreshConfig().then((c) => setCfg({ ...c })); }, []);
   const [f, setF] = useState({ title: '', description: '', department: '', owner: '', category: '' });
   const [consent, setConsent] = useState(false); const [dups, setDups] = useState([]); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
