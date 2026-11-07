@@ -8,10 +8,11 @@ export function findDescription(step, descriptions = {}) {
   return hits.sort((a, b) => Number(a[0]) - Number(b[0])).map(([, t]) => String(t).trim()).join('\n') || '';
 }
 
-export function applyStepDescriptions(result, descriptions = {}) {
-  if (!descriptions || !Object.keys(descriptions).length) return result;
+// `drafts` are the AI's descriptions: used only for steps the author did not describe.
+export function applyStepDescriptions(result, descriptions = {}, drafts = {}) {
+  if (!Object.keys(descriptions || {}).length && !Object.keys(drafts || {}).length) return result;
   for (const step of result.doc.steps) {
-    const text = findDescription(step, descriptions);
+    const text = findDescription(step, descriptions) || findDescription(step, drafts);
     if (!text) continue;
     step.description = text;
     // A step captured from screen sharing only has no recorded actions: the author's words are the evidence.

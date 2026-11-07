@@ -31,7 +31,7 @@ Status legend: ✅ automated test passes · 🟡 implemented, needs a real envir
 ## Automated tests
 
 ```bash
-npm test                     # 29 unit/API tests (engines, redaction, API workflow, RBAC, conflicts, retention, Claude engine with a fake client, Foundry/Claude API provider selection, SharePoint adapter with a mocked Graph incl. managed identity)
+npm test                     # 32 unit/API tests (engines, redaction, API workflow, RBAC, conflicts, retention, Claude engine and AI step descriptions with a fake client, Foundry/Claude API provider selection, SharePoint adapter with a mocked Graph incl. managed identity)
 npm run test:e2e             # builds the app, launches Chromium with the extension, runs both workflows end to end
 python3 -m unittest discover -s desktop-agent/tests   # 8 desktop-agent tests (incl. machine policy / allowed servers)
 ```

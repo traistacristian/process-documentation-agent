@@ -8,7 +8,7 @@
     "sharePointLibrary": { "value": "Documents" },
     "costProfile": { "value": "free" },
     "budgetAlertEmail": { "value": "" },
-    "aiProvider": { "value": "rules" },
+    "aiProvider": { "value": "anthropic" },
     "foundryResourceName": { "value": "" },
     "appServiceSku": { "value": "P0v3" }
   }

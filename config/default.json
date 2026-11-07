@@ -14,8 +14,9 @@
   },
   "ai": {
     "provider": "auto",
-    "model": "claude-opus-5-5",
-    "effort": "high",
+    "model": "claude-haiku-5-5",
+    "effort": "low",
+    "describeSteps": true,
     "maxScreenshotsToModel": 20,
     "foundry": { "resource": "" }
   },

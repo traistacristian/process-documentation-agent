@@ -41,6 +41,8 @@ export function loadConfig(overrides = {}) {
   if (env.ENTRA_API_SCOPE) cfg.auth.entra.apiScope = env.ENTRA_API_SCOPE;
   if (env.PDA_REQUIRE_SEPARATE_APPROVER) cfg.auth.requireSeparateApprover = env.PDA_REQUIRE_SEPARATE_APPROVER === 'true';
   if (env.ANTHROPIC_MODEL) cfg.ai.model = env.ANTHROPIC_MODEL;
+  if (env.ANTHROPIC_EFFORT) cfg.ai.effort = env.ANTHROPIC_EFFORT;
+  if (env.PDA_AI_DESCRIBE_STEPS) cfg.ai.describeSteps = env.PDA_AI_DESCRIBE_STEPS !== 'false';
   if (env.ANTHROPIC_FOUNDRY_RESOURCE) cfg.ai.foundry = { ...(cfg.ai.foundry || {}), resource: env.ANTHROPIC_FOUNDRY_RESOURCE };
   if (env.PDA_PUBLIC_URL) cfg.publicUrl = env.PDA_PUBLIC_URL;
   if (env.SP_TENANT_ID) cfg.repository.sharepoint.tenantId = env.SP_TENANT_ID;

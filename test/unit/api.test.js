@@ -193,3 +193,42 @@ test('the author describes each step during recording; the text lands in the doc
   assert.deepEqual(d.doc.steps.map((x) => x.description), ['Find the user who asked for access', 'Give the helpdesk role']);
   assert.ok(d.doc.steps[0].instructions.length > 1, 'recorded instructions are kept');
 });
+
+test('with Claude configured, finished steps get an AI description that the author only corrects', async () => {
+  const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'pda-ai-'));
+  const c2 = loadConfig({ dataDir: d2, ai: { provider: 'anthropic' } });
+  c2.repository.local.path = path.join(d2, 'repository');
+  const calls = [];
+  const { generateWithRules } = await import('../../server/engine/generate-rules.js');
+  const a2 = createApp(c2, {
+    describeStepWithClaude: async ({ step, screenshot }) => { calls.push({ step: step.number, hasShot: Boolean(screenshot) }); return `AI: step ${step.number}`; },
+    generateWithClaude: (input) => generateWithRules(input),
+  });
+  const s2 = http.createServer(a2); await new Promise((r) => s2.listen(0, '127.0.0.1', r));
+  const b2 = `http://127.0.0.1:${s2.address().port}`;
+  const c = async (method, p, body, user = 'alex', headers = {}) => { const r = await fetch(b2 + p, { method, headers: { 'content-type': 'application/json', 'x-dev-user': user, ...headers }, body: body ? JSON.stringify(body) : undefined }); return r.headers.get('content-type')?.includes('json') ? r.json() : null; };
+  try {
+    const s = await c('POST', '/api/sessions', { mode: 'new', title: 'Grant helpdesk permissions', consent: true });
+    const pair = await c('POST', '/api/capture/pair', { code: s.pairing.code, client: { type: 'browser-extension' } }, null);
+    const h = { authorization: `Bearer ${pair.captureToken}`, 'x-session-id': s.id };
+    const shot = await c('POST', '/api/capture/screenshots', { data: PNG }, null, h);
+    await c('POST', '/api/capture/events', { events: v1Events().filter((e) => e.type !== 'start').map((e) => ({ ...e, seq: undefined, screenshotId: e.screenshotId ? shot.id : undefined, clientId: `c${e.seq}` })) }, null, h);
+    let steps = await c('GET', `/api/sessions/${s.id}/steps`);
+    assert.equal(steps[0].aiPending, true, 'a finished step is sent to the AI');
+    assert.equal(steps[1].aiPending, false, 'the current step waits until it is finished');
+    await new Promise((r) => setTimeout(r, 50));
+    steps = await c('GET', `/api/sessions/${s.id}/steps`);
+    assert.equal(steps[0].suggested, 'AI: step 1');
+    assert.equal(steps[0].suggestedBy, 'ai');
+    await c('POST', `/api/sessions/${s.id}/control`, { action: 'stop' });
+    await c('GET', `/api/sessions/${s.id}/steps`);
+    await new Promise((r) => setTimeout(r, 50));
+    steps = await c('GET', `/api/sessions/${s.id}/steps`);
+    assert.equal(steps[1].suggested, 'AI: step 2', 'after stop the last step is described too');
+    assert.equal(calls.length, 2, 'each step is described once');
+    await c('PUT', `/api/sessions/${s.id}/step-descriptions`, { seq: steps[1].firstSeq, text: 'Give the helpdesk role' });
+    const gen = await c('POST', `/api/sessions/${s.id}/generate`, {});
+    let d; for (let i = 0; i < 50; i++) { d = await c('GET', `/api/drafts/${gen.id}`); if (d.status !== 'generating') break; await new Promise((r) => setTimeout(r, 50)); }
+    assert.deepEqual(d.doc.steps.map((x) => x.description), ['AI: step 1', 'Give the helpdesk role'], 'the author correction wins over the AI text');
+  } finally { s2.close(); fs.rmSync(d2, { recursive: true, force: true }); }
+});

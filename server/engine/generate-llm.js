@@ -62,9 +62,9 @@ export async function generateWithClaude({ cfg, meta, events, screenshots, base,
 
   const anthropic = client || (await createClient(cfg));
   const format = zodOutputFormat(LlmOutput);
-  // Server-side fallback (retry a declined request on a fallback model) is a Claude API feature;
-  // on Foundry a refusal goes straight to the rule-based engine instead.
-  const fallback = aiProvider(cfg) === 'foundry' ? {} : { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' };
+  // Server-side fallback (retry a declined request on a fallback model) is a Claude API feature for
+  // the larger models; Haiku has none and Foundry neither, so there a refusal goes to the rule-based engine.
+  const fallback = aiProvider(cfg) === 'foundry' || !/^claude-opus/.test(cfg.ai.model) ? {} : { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' };
   const stream = anthropic.beta.messages.stream({
     model: cfg.ai.model,
     max_tokens: 64000,

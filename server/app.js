@@ -11,6 +11,7 @@ import { sanitizeEvent } from './engine/redact.js';
 import { generateWithRules } from './engine/generate-rules.js';
 import { generateWithClaude, aiAvailable, aiProvider } from './engine/generate-llm.js';
 import { applyStepDescriptions, findDescription } from './engine/describe.js';
+import { describeStepWithClaude, aiDescribeEnabled } from './engine/describe-ai.js';
 import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from './engine/compare.js';
 import { normalizeDoc } from './engine/schema.js';
 import { applyAnswer } from './engine/clarify.js';
@@ -52,6 +53,32 @@ export function createApp(cfg, deps = {}) {
     for (const d of store.list('drafts')) if (d.sessionId === sessionId) for (const st of d.doc?.steps || []) for (const id of st.screenshotIds || []) keep.add(id);
     return keep;
   };
+  // AI step descriptions are drafted in the background (one short call per finished step) and cached
+  // on the session; the recorder's list polls and shows them as soon as they are ready.
+  const describeStep = deps.describeStepWithClaude || describeStepWithClaude;
+  const aiDescribing = new Set();
+  const stepSignature = (st) => `${st.screenshotIds[0] || ''}|${st.evidenceEventSeqs.length}`;
+  function queueAiDescription(sessionId, st, firstSeq, sig) {
+    const key = `${sessionId}:${firstSeq}`;
+    if (aiDescribing.has(key)) return true;
+    if (aiDescribing.size >= 4) return true; // a few at a time; the rest are picked up on the next poll
+    aiDescribing.add(key);
+    const id = st.screenshotIds[0];
+    const screenshot = id ? { path: store.screenshotPath(sessionId, id), mime: store.screenshotPath(sessionId, id).endsWith('.png') ? 'image/png' : 'image/jpeg' } : null;
+    const remember = (entry) => {
+      const cur = store.get('sessions', sessionId);
+      if (!cur) return;
+      cur.aiDescriptions = { ...(cur.aiDescriptions || {}), [firstSeq]: { sig, ...entry } };
+      store.put('sessions', cur);
+    };
+    Promise.resolve()
+      .then(() => describeStep({ cfg, step: st, screenshot }))
+      .then((text) => remember({ text }), (e) => { remember({ text: '', error: e.message }); audit.write(null, 'step.ai_describe_failed', { sessionId, error: e.message }); })
+      .finally(() => aiDescribing.delete(key));
+    return true;
+  }
+  const aiTexts = (sess) => Object.fromEntries(Object.entries(sess?.aiDescriptions || {}).filter(([, v]) => v?.text).map(([k, v]) => [k, v.text]));
+
   const engineName = () => (aiAvailable(cfg) ? `claude (${cfg.ai.model}${aiProvider(cfg) === 'foundry' ? ', Microsoft Foundry' : ''})` : 'rules');
   const publicSession = (s) => { const { captureTokenHash, ...rest } = s; return rest; };
 
@@ -206,8 +233,24 @@ export function createApp(cfg, deps = {}) {
   app.get('/api/sessions/:id/steps', wrap(async (req, res) => {
     const s = loadSession(req);
     const shots = new Set(store.listScreenshots(s.id));
-    const { doc } = applyStepDescriptions(generateWithRules({ meta: s.meta, events: store.readEvents(s.id), screenshotsAvailable: shots, base: null, user: req.user }), s.stepDescriptions);
-    res.json(doc.steps.map((st) => ({ key: st.evidenceEventSeqs[st.evidenceEventSeqs.length - 1] ?? null, firstSeq: st.evidenceEventSeqs[0] ?? null, number: st.number, title: st.title, screenshotId: st.screenshotIds[0] || null, description: findDescription(st, s.stepDescriptions), suggested: [...st.instructions, st.expectedResult].filter(Boolean).join(' '), screenOnly: /^Screen \d+ \(describe the action\)$/.test(st.title) })));
+    const { doc } = generateWithRules({ meta: s.meta, events: store.readEvents(s.id), screenshotsAvailable: shots, base: null, user: req.user });
+    const ai = s.aiDescriptions || {};
+    const live = s.status === 'recording' || s.status === 'paused';
+    const describe = aiDescribeEnabled(cfg) && s.status !== 'generated';
+    const out = doc.steps.map((st, i) => {
+      const firstSeq = st.evidenceEventSeqs[0] ?? null;
+      const description = findDescription(st, s.stepDescriptions);
+      const rules = [...st.instructions, st.expectedResult].filter(Boolean).join(' ');
+      const sig = stepSignature(st);
+      // While recording, the last step may still grow: it is described once it is finished.
+      const settled = !live || i < doc.steps.length - 1;
+      const cached = firstSeq != null ? ai[firstSeq] : null;
+      const aiText = cached?.sig === sig ? cached.text : '';
+      let aiPending = false;
+      if (describe && settled && !description && firstSeq != null && !aiText && cached?.sig !== sig) aiPending = queueAiDescription(s.id, st, firstSeq, sig);
+      return { key: st.evidenceEventSeqs[st.evidenceEventSeqs.length - 1] ?? null, firstSeq, number: st.number, title: st.title, screenshotId: st.screenshotIds[0] || null, description, suggested: aiText || rules, suggestedBy: aiText ? 'ai' : rules ? 'rules' : null, aiPending, screenOnly: /^Screen \d+ \(describe the action\)$/.test(st.title) };
+    });
+    res.json(out);
   }));
   app.put('/api/sessions/:id/step-descriptions', wrap(async (req, res) => {
     const s = loadSession(req);
@@ -298,7 +341,9 @@ export function createApp(cfg, deps = {}) {
         result = generators.rules(input);
         result.suggestions = [`The AI engine was unavailable (${e.message}); this draft was produced by the rule-based engine.`, ...result.suggestions];
       }
-      applyStepDescriptions(result, store.get('sessions', s.id)?.stepDescriptions || s.stepDescriptions);
+      // The recorder's own corrections win over the AI's draft descriptions.
+      const latest = store.get('sessions', s.id) || s;
+      applyStepDescriptions(result, latest.stepDescriptions, aiTexts(latest));
       const doc = result.doc;
       if (s.mode === 'new') {
         doc.info.processId = `PRC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;

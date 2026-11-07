@@ -5,8 +5,9 @@ name: Deploy to Azure
 #   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID   (federated credential for this repo, environment "production")
 #   AZURE_RESOURCE_GROUP, SHAREPOINT_SITE_URL, SHAREPOINT_LIBRARY
 #   COST_PROFILE (free | standard, default free), BUDGET_ALERT_EMAIL
-#   AI_PROVIDER (foundry | anthropic | rules), FOUNDRY_RESOURCE_NAME
+#   AI_PROVIDER (foundry | anthropic | rules), FOUNDRY_RESOURCE_NAME, CLAUDE_MODEL, CLAUDE_EFFORT
 #   ENTRA_API_CLIENT_ID, ENTRA_SPA_CLIENT_ID   (printed by scripts/Setup-EntraAndSharePoint.ps1)
+# Secret (optional): ANTHROPIC_API_KEY - Claude API key; without it the free profile uses the rule-based engine.
 on:
   workflow_run:
     workflows: [CI]
@@ -25,7 +26,9 @@ env:
   SHAREPOINT_LIBRARY: ${{ vars.SHAREPOINT_LIBRARY || 'Documents' }}
   COST_PROFILE: ${{ vars.COST_PROFILE || 'free' }}
   BUDGET_ALERT_EMAIL: ${{ vars.BUDGET_ALERT_EMAIL || '' }}  # empty keeps the existing budget; the address stays out of this public repo
-  AI_PROVIDER: ${{ vars.AI_PROVIDER || 'rules' }}
+  AI_PROVIDER: ${{ vars.AI_PROVIDER || 'anthropic' }}  # free profile: Claude only when the ANTHROPIC_API_KEY secret exists, else rules
+  CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-haiku-5-5' }}
+  CLAUDE_EFFORT: ${{ vars.CLAUDE_EFFORT || 'low' }}
   FOUNDRY_RESOURCE_NAME: ${{ vars.FOUNDRY_RESOURCE_NAME || '' }}
   ENTRA_API_CLIENT_ID: ${{ vars.ENTRA_API_CLIENT_ID || '3a4c8535-a9aa-433d-8d21-819f504675b2' }}
   ENTRA_SPA_CLIENT_ID: ${{ vars.ENTRA_SPA_CLIENT_ID || '495fe82c-7540-4721-ab9e-81ce531c95cc' }}
@@ -59,12 +62,15 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Deploy infrastructure
         id: infra
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           out=$(az deployment group create -g "${{ env.AZURE_RESOURCE_GROUP }}" -f infra/main.bicep \
             -p location="${{ env.AZURE_LOCATION }}" costProfile="${{ env.COST_PROFILE }}" budgetAlertEmail="${{ env.BUDGET_ALERT_EMAIL }}" \
                sharePointSiteUrl="${{ env.SHAREPOINT_SITE_URL }}" \
                sharePointLibrary="${{ env.SHAREPOINT_LIBRARY }}" \
-               aiProvider="${{ env.AI_PROVIDER }}" \
+               aiProvider="${{ env.AI_PROVIDER }}" claudeModel="${{ env.CLAUDE_MODEL }}" claudeEffort="${{ env.CLAUDE_EFFORT }}" \
+               anthropicApiKey="$ANTHROPIC_API_KEY" \
                foundryResourceName="${{ env.FOUNDRY_RESOURCE_NAME }}" \
                entraApiClientId="${{ env.ENTRA_API_CLIENT_ID }}" \
                entraSpaClientId="${{ env.ENTRA_SPA_CLIENT_ID }}" \

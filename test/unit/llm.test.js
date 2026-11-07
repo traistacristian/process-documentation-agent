@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { generateWithClaude } from '../../server/engine/generate-llm.js';
+import { describeStepWithClaude } from '../../server/engine/describe-ai.js';
 import { loadConfig } from '../../server/config.js';
 import { v1Events } from './helpers.js';
 
@@ -32,9 +33,33 @@ function fakeClient(responseText, capture) {
   return { beta: { messages: { stream: (req) => { capture.req = req; return { finalMessage: async () => ({ model: 'claude-opus-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: responseText }] }) }; } } } };
 }
 
+test('default is the cheapest model (Claude Haiku 5.5) at low effort, without fallbacks', async () => {
+  const cap = {};
+  const cfg = loadConfig();
+  await generateWithClaude({ cfg, meta: { title: 'Grant helpdesk permissions' }, events: v1Events(), screenshots: [], base: null, user: { name: 'Alex' }, client: fakeClient(JSON.stringify(answer), cap) });
+  assert.equal(cap.req.model, 'claude-haiku-5-5');
+  assert.equal(cap.req.output_config.effort, 'low');
+  assert.equal(cap.req.fallbacks, undefined, 'Haiku has no server-side fallback');
+  assert.equal(cap.req.betas, undefined);
+});
+
+test('a step is described from its screenshot and recognised actions', async () => {
+  let req;
+  const client = { messages: { create: async (r) => { req = r; return { stop_reason: 'end_turn', content: [{ type: 'text', text: '  In the admin center, open Active users.  ' }] }; } } };
+  const text = await describeStepWithClaude({ cfg: loadConfig(), step: { number: 2, title: 'Screen 2 (describe the action)', instructions: [] }, screenshot: { path: shotPath, mime: 'image/png' }, client });
+  assert.equal(text, 'In the admin center, open Active users.');
+  assert.equal(req.model, 'claude-haiku-5-5');
+  assert.equal(req.output_config.effort, 'low');
+  assert.equal(req.messages[0].content[0].type, 'image');
+  assert.match(req.messages[0].content[1].text, /screen sharing only/);
+  const refused = { messages: { create: async () => ({ stop_reason: 'refusal', content: [] }) } };
+  await assert.rejects(describeStepWithClaude({ cfg: loadConfig(), step: { number: 1, title: 'x', instructions: [] }, screenshot: null, client: refused }));
+});
+
 test('request uses structured output, adaptive thinking, fallbacks and sends screenshots as images', async () => {
   const cap = {};
   const cfg = loadConfig();
+  cfg.ai.model = 'claude-opus-5-5';
   const r = await generateWithClaude({ cfg, meta: { title: 'Grant helpdesk permissions' }, events: v1Events(), screenshots: [{ id: 'shot_aa01', path: shotPath, mime: 'image/png' }], base: null, user: { name: 'Alex' }, client: fakeClient(JSON.stringify(answer), cap) });
   assert.equal(cap.req.model, 'claude-opus-5-5');
   assert.deepEqual(cap.req.thinking, { type: 'adaptive' });

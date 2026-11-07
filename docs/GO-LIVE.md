@@ -9,10 +9,26 @@ goes straight into Key Vault.
 
 `costProfile=free` deploys only free-of-charge resources: App Service plan **F1 (Free)**, data on the
 App Service's own persistent `/home` storage (1 GB), no storage account, Key Vault, Log Analytics or
-Application Insights, and the built-in rule engine instead of Claude. Entra app registrations,
+Application Insights, and the built-in rule engine instead of Claude (Claude can be added, billed by Anthropic, see below). Entra app registrations,
 SharePoint (your existing Microsoft 365) and GitHub Actions on a public repository are free too. If
 your tenant has no Entra ID P1, the setup script assigns roles to the groups' members one by one.
 Set `budgetAlertEmail` to get an e-mail on any spend at all.
+
+### Claude in free mode (optional, lowest cost)
+
+Claude is billed by Anthropic, not by Azure, so it does not touch the "no Azure costs" rule. To turn it on:
+
+1. In the [Claude Console](https://console.anthropic.com) create an organization, buy the smallest
+   prepaid credit and set a low monthly **spend limit** (Settings > Limits). Create an API key.
+2. In GitHub: repository **Settings > Secrets and variables > Actions > New repository secret**, name
+   `ANTHROPIC_API_KEY`, paste the key there (never in a chat, ticket or file).
+3. Re-run the latest **Deploy to Azure** run (or push any change). The key becomes an encrypted app
+   setting; without the secret the app keeps using the rule engine.
+
+Defaults: model **Claude Haiku 5.5** (`claude-haiku-5-5`, the lowest-cost model) at effort **low**
+(repository variables `CLAUDE_MODEL` / `CLAUDE_EFFORT` change them). Claude then drafts each step's
+description from its screenshot while you record (one short call per step) and writes the document
+draft. Typical cost: well under one cent per recorded step.
 
 Free-tier limits: 60 CPU minutes per day, the app sleeps after about 20 minutes idle (the first
 request then takes ~20 s), 1 GB of storage, one free Linux plan per region per subscription. Fine for

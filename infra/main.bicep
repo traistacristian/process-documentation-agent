@@ -31,13 +31,21 @@ param entraApiClientId string = ''
 param entraSpaClientId string = ''
 
 @allowed([ 'foundry', 'anthropic', 'rules' ])
-@description('foundry = Claude in Microsoft Foundry (managed identity), anthropic = Claude API key from Key Vault, rules = no AI.')
+@description('foundry = Claude in Microsoft Foundry (managed identity), anthropic = Claude API (key from Key Vault on standard, from anthropicApiKey on free), rules = no AI.')
 param aiProvider string = 'foundry'
+
+@secure()
+@description('Claude API key for costProfile=free (Key Vault is a paid service). Passed from the GitHub secret ANTHROPIC_API_KEY; empty = rule-based engine.')
+param anthropicApiKey string = ''
 
 @description('Foundry resource name (the {resource} in https://{resource}.services.ai.azure.com). Only for aiProvider=foundry.')
 param foundryResourceName string = ''
 
-param claudeModel string = 'claude-opus-5-5'
+@description('Claude model. Claude Haiku 5.5 is the lowest-cost model.')
+param claudeModel string = 'claude-haiku-5-5'
+
+@allowed([ 'low', 'medium', 'high', 'xhigh', 'max' ])
+param claudeEffort string = 'low'
 
 @allowed([ 'free', 'standard' ])
 @description('free = no Azure charges (F1 plan, no paid services, rule-based engine). standard = production layout.')
@@ -66,7 +74,8 @@ var shareName = 'pda-data'
 var dataMount = '/mnt/pda-data'
 var keyVaultSecretsUser = '4633458b-17de-408a-b874-0445c86b69e6'
 var paid = costProfile == 'standard'
-var effectiveAi = paid ? aiProvider : 'rules'
+// Free profile: no paid Azure AI service; the Claude API (billed by Anthropic, not Azure) only when a key is given.
+var effectiveAi = paid ? aiProvider : (aiProvider == 'anthropic' && !empty(anthropicApiKey) ? 'anthropic' : 'rules')
 
 resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (paid) {
   name: '${namePrefix}-logs-${suffix}'
@@ -145,6 +154,7 @@ var baseSettings = [
   { name: 'SP_LIBRARY', value: sharePointLibrary }
   { name: 'SP_ROOT_FOLDER', value: sharePointRootFolder }
   { name: 'ANTHROPIC_MODEL', value: claudeModel }
+  { name: 'ANTHROPIC_EFFORT', value: claudeEffort }
   { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'false' }
   { name: 'WEBSITE_RUN_FROM_PACKAGE', value: '1' }
   { name: 'NODE_ENV', value: 'production' }
@@ -155,8 +165,9 @@ var monitorSettings = paid ? [
 var aiSettings = effectiveAi == 'foundry' ? [
   { name: 'ANTHROPIC_FOUNDRY_RESOURCE', value: foundryResourceName }
 ] : effectiveAi == 'anthropic' ? [
-  // Resolved by App Service from Key Vault with the managed identity. The secret is created by the setup script.
-  { name: 'ANTHROPIC_API_KEY', value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=anthropic-api-key)' }
+  // standard: resolved by App Service from Key Vault with the managed identity (secret created by the setup script).
+  // free: the key from the GitHub secret, stored as an encrypted app setting.
+  { name: 'ANTHROPIC_API_KEY', value: paid ? '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=anthropic-api-key)' : anthropicApiKey }
 ] : []
 
 resource web 'Microsoft.Web/sites@2023-12-01' = {

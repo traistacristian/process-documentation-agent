@@ -227,12 +227,12 @@ function StepDescriptions({ id, status }) {
   return (
     <div className="panel">
       <h2>Steps so far</h2>
-      <p className="small muted">Each step is described automatically from what was recognised. Check it and correct it only if it is wrong; your correction replaces the automatic text in the document. You can also change it later on the review page.</p>
+      <p className="small muted">Each step is described automatically from its screenshot and what was recognised (finished steps first; the current step is described when you move on). Check it and correct it only if it is wrong; your correction replaces the automatic text in the document. You can also change it later on the review page.</p>
       {err && <div className="alert err small">{err}</div>}
       {steps.length ? <ol className="list" data-testid="step-descriptions" style={{ paddingLeft: 0 }}>{steps.map((st) => (
         <li key={st.firstSeq ?? st.number} style={{ display: 'block' }}>
-          <div className="row" style={{ justifyContent: 'space-between' }}><b>{st.number}. {st.title}</b><span className="small muted">{saved[st.firstSeq] ? 'saved' : st.description ? 'edited by you' : st.suggested ? 'automatic' : ''}</span></div>
-          <textarea data-testid="step-description" rows={2} style={{ width: '100%', marginTop: 6 }} placeholder={st.screenOnly ? 'Screen sharing shows the screen but not your clicks: describe what you did here.' : 'What did you do in this step?'}
+          <div className="row" style={{ justifyContent: 'space-between' }}><b>{st.number}. {st.title}</b><span className="small muted">{saved[st.firstSeq] ? 'saved' : st.description ? 'edited by you' : st.suggestedBy === 'ai' ? 'written by AI - check it' : st.aiPending ? 'AI is describing this step...' : st.suggested ? 'automatic' : ''}</span></div>
+          <textarea data-testid="step-description" rows={2} style={{ width: '100%', marginTop: 6 }} placeholder={st.aiPending ? 'The AI is writing a description from the screenshot...' : st.screenOnly ? 'Screen sharing shows the screen but not your clicks: describe what you did here.' : 'What did you do in this step?'}
             value={edit[st.firstSeq] ?? (st.description || st.suggested)}
             onChange={(e) => setEdit((x) => ({ ...x, [st.firstSeq]: e.target.value }))}
             onBlur={() => save(st)} disabled={st.firstSeq == null || status === 'generated'} />
