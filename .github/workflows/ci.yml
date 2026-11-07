@@ -50,13 +50,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
-      - run: py -m pip install -r desktop-agent/requirements.txt pyinstaller
-      - run: py -m unittest discover -s desktop-agent/tests
+      - run: python -m pip install -r desktop-agent/requirements.txt pyinstaller
+      - run: python -m unittest discover -s desktop-agent/tests
       - name: Smoke-test the Windows platform layer (UI Automation, pynput, mss import and initialise)
         working-directory: desktop-agent
         continue-on-error: true  # hosted runners may not have an interactive desktop
-        run: py -c "from pda_agent.platforms import detect_provider; p = detect_provider(); print(p.name); import mss, pynput; print('ok')"
-      - run: py -m PyInstaller deploy/desktop-agent/pda_agent.spec --distpath dist --workpath build --noconfirm
+        run: python -c "from pda_agent.platforms import detect_provider; p = detect_provider(); print(p.name); import mss, pynput; print('ok')"
+      - run: python -m PyInstaller deploy/desktop-agent/pda_agent.spec --distpath dist --workpath build --noconfirm
       - name: Assemble the Intune package folder
         shell: pwsh
         run: |
@@ -76,6 +76,6 @@ jobs:
         shell: pwsh
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
-          $r = Invoke-ScriptAnalyzer -Path scripts, deploy -Recurse -Severity Error
+          $r = foreach ($p in 'scripts', 'deploy') { Invoke-ScriptAnalyzer -Path $p -Recurse -Severity Error }
           $r | Format-Table -AutoSize
           if ($r) { exit 1 }
