@@ -35,9 +35,17 @@ if (-not $app) { $app = New-AzADApplication -DisplayName $name }
 $sp = Get-AzADServicePrincipal -ApplicationId $app.AppId
 if (-not $sp) { $sp = New-AzADServicePrincipal -ApplicationId $app.AppId }
 
-$subject = "repo:$($Repository):environment:production"
-if (-not (Get-AzADAppFederatedCredential -ApplicationObjectId $app.Id | Where-Object Subject -eq $subject)) {
-  New-AzADAppFederatedCredential -ApplicationObjectId $app.Id -Name 'github-production' -Issuer 'https://token.actions.githubusercontent.com' -Subject $subject -Audience 'api://AzureADTokenExchange' | Out-Null
+# GitHub sends either the classic subject or, for newer repositories, one with immutable owner/repo ids
+# (repo:owner@123/name@456:environment:production). Register both.
+$subjects = @{ 'github-production' = "repo:$($Repository):environment:production" }
+try {
+  $info = Invoke-RestMethod "https://api.github.com/repos/$Repository" -Headers @{ 'User-Agent' = 'pda-setup' }
+  $subjects['github-production-ids'] = "repo:$($info.owner.login)@$($info.owner.id)/$($info.name)@$($info.id):environment:production"
+} catch { Write-Warning "Could not read repository ids from GitHub ($($_.Exception.Message)); only the classic subject is registered." }
+$existing = @(Get-AzADAppFederatedCredential -ApplicationObjectId $app.Id)
+foreach ($n in $subjects.Keys) {
+  if ($existing | Where-Object Subject -eq $subjects[$n]) { continue }
+  New-AzADAppFederatedCredential -ApplicationObjectId $app.Id -Name $n -Issuer 'https://token.actions.githubusercontent.com' -Subject $subjects[$n] -Audience 'api://AzureADTokenExchange' | Out-Null
 }
 # Contributor deploys the resources; the template also creates one role assignment (Key Vault Secrets User
 # for the app's identity), which needs permission to write role assignments on this resource group.
