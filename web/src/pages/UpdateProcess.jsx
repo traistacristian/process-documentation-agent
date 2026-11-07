@@ -45,7 +45,7 @@ export default function UpdateProcess({ processId }) {
       {results === null ? <p><span className="spinner" /></p> : results.length ? (
         <ul className="list" style={{ marginTop: 10 }}>{results.map((p) => (
           <li key={p.processId}><span><b>{p.title}</b><br /><span className="small muted">{p.processId} · v{p.version} · {p.category || 'Uncategorised'} · owner {p.owner || '–'}</span></span><a className="btn sm primary" href={`#/update/${p.processId}`}>Select</a></li>
-        ))}</ul>) : <p className="empty">No documented processes match your search.</p>}
+        ))}</ul>) : <p className="empty">{q ? 'No documented processes match your search.' : 'No published processes yet. Only published documents can be updated; drafts and recordings that are not published yet are on the Home page.'}</p>}
     </div>
   );
 }

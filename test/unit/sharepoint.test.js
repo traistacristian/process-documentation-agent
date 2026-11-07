@@ -30,8 +30,10 @@ function fakeGraph() {
     if (u.includes('/lists/list1/columns') && m === 'GET') return json(200, { value: [{ name: 'Title' }] });
     if (u.includes('/lists/list1/columns') && m === 'POST') return json(201, {});
     if (u.includes('/lists/list1/items')) {
-      const pid = /PDA_ProcessId eq '([^']+)'/.exec(u)?.[1];
-      const docs = [...items.values()].filter((i) => i.fields.PDA_ProcessId && (!pid || i.fields.PDA_ProcessId === pid));
+      // Like real SharePoint: "ne null" is not a supported list-item filter.
+      if (/ne%20null|ne null/.test(u)) return json(400, { error: { code: 'invalidRequest', message: 'Invalid filter clause' } });
+      const pid = /PDA_ProcessId eq '([^']+)'/.exec(decodeURIComponent(u))?.[1];
+      const docs = [...items.values()].filter((i) => !pid || i.fields.PDA_ProcessId === pid);
       return json(200, { value: docs.map((i) => ({ fields: { ...i.fields }, driveItem: { id: i.id, name: i.name, webUrl: view(i).webUrl, parentReference: { id: i.parentId } }, createdDateTime: '2026-01-01', lastModifiedDateTime: '2026-01-02' })) });
     }
     let r;

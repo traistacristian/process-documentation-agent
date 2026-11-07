@@ -84,7 +84,8 @@ export class SharePointRepository {
   async #queryItems(filter) {
     const { siteId, listId } = await this.#resolve();
     const out = [];
-    let url = `/sites/${siteId}/lists/${listId}/items?$expand=fields($select=Title,${COLUMNS.join(',')}),driveItem($select=id,name,webUrl,parentReference)&$filter=${encodeURIComponent(filter)}&$top=200`;
+    const where = filter ? `&$filter=${encodeURIComponent(filter)}` : '';
+    let url = `/sites/${siteId}/lists/${listId}/items?$expand=fields($select=Title,${COLUMNS.join(',')}),driveItem($select=id,name,webUrl,parentReference)${where}&$top=200`;
     while (url) {
       const page = await this.graph.get(url, { headers: { Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly' } });
       out.push(...page.value);
@@ -94,7 +95,9 @@ export class SharePointRepository {
   }
 
   async list() {
-    const items = await this.#queryItems("fields/PDA_ProcessId ne null");
+    // SharePoint cannot filter on "is not empty", so read the library and keep the documents that carry
+    // a process id (the library only holds this tool's documents and their images).
+    const items = await this.#queryItems(null);
     return items.map((i) => this.#toSummary(i)).filter((x) => x.processId).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   }
 
@@ -106,8 +109,13 @@ export class SharePointRepository {
 
   async #findItem(processId) {
     if (!/^[A-Z0-9-]+$/.test(processId)) return null;
-    const items = await this.#queryItems(`fields/PDA_ProcessId eq '${processId}'`);
-    return items[0] ? this.#toSummary(items[0]) : null;
+    try {
+      const items = await this.#queryItems(`fields/PDA_ProcessId eq '${processId}'`);
+      return items[0] ? this.#toSummary(items[0]) : null;
+    } catch (e) {
+      if (e.status !== 400) throw e; // column not indexed yet, or filter refused: read the list instead
+      return (await this.list()).find((p) => p.processId === processId) || null;
+    }
   }
 
   async get(processId) {
