@@ -40,3 +40,14 @@ test('errors shown by the application become exceptions with a clarification', (
   assert.equal(doc.exceptions[0].handling, '');
   assert.ok(clarifications.some((c) => c.section === 'exceptions'));
 });
+
+test('screen-sharing-only recording: one step per captured screen, actions left for the author', () => {
+  const ev = [{ type: 'start', ts: 1, seq: 1 }];
+  ['shot_a1', 'shot_b2', 'shot_c3'].forEach((id, i) => ev.push({ type: 'screenshot', ts: 10 + i, seq: 2 + i, screenshotId: id, source: 'web' }));
+  ev.push({ type: 'stop', ts: 99, seq: 9 });
+  const { doc, clarifications } = generateWithRules({ meta: { title: 'Screen only' }, events: ev, screenshotsAvailable: new Set(['shot_a1', 'shot_b2', 'shot_c3']), user: {} });
+  assert.equal(doc.steps.length, 3);
+  assert.deepEqual(doc.steps.map((s) => s.screenshotIds[0]), ['shot_a1', 'shot_b2', 'shot_c3']);
+  assert.ok(doc.steps.every((s) => s.instructions.length === 0), 'no invented instructions');
+  assert.equal(clarifications.filter((c) => /screen sharing only/.test(c.question)).length, 3);
+});

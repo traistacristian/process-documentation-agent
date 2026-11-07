@@ -42,8 +42,9 @@ function shortUrl(url) {
   try { const u = new URL(url); return `${u.host}${u.pathname}`.replace(/\/$/, ''); } catch { return url; }
 }
 
-function stepTitle(seg) {
+function stepTitle(seg, n) {
   if (seg.markLabel) return seg.markLabel;
+  if (seg.reason === 'screen') return `Screen ${n} (describe the action)`;
   const page = pageName(seg.location);
   const acts = seg.events.filter((e) => ['click', 'submit', 'input', 'change', 'select'].includes(e.type));
   const SAVE = /^(save|apply|submit|ok|confirm|update|create|add|assign|delete|remove|reset|send|finish)/i;
@@ -82,7 +83,7 @@ export function generateWithRules({ meta, events, screenshotsAvailable = new Set
   doc.steps = segs.map((seg, i) => {
     const s = emptyStep(i + 1);
     s.id = `stp_${crypto.randomBytes(4).toString('hex')}`;
-    s.title = stepTitle(seg);
+    s.title = stepTitle(seg, i + 1);
     s.application = applicationName(seg.location);
     systems.add(s.application);
     s.important = seg.important;
@@ -95,7 +96,7 @@ export function generateWithRules({ meta, events, screenshotsAvailable = new Set
       if (line && instr[instr.length - 1] !== line) instr.push(line);
       if (ev.type === 'feedback' && ev.level === 'error') errors.push({ step: s, text: ev.text });
     }
-    if (!seg.events.some((e) => e.type === 'navigate' || e.type === 'window_focus') && i === 0 && seg.location) {
+    if (!seg.events.some((e) => e.type === 'navigate' || e.type === 'window_focus') && i === 0 && (seg.location?.url || seg.location?.windowTitle)) {
       instr.unshift(`Open ${q(pageName(seg.location))} in ${s.application}.`);
     }
     s.instructions = instr;
@@ -114,7 +115,8 @@ export function generateWithRules({ meta, events, screenshotsAvailable = new Set
     const shots = seg.events.map((e) => e.screenshotId).filter((id) => id && screenshotsAvailable.has(id));
     s.screenshotIds = [...new Set(shots)].slice(0, seg.important ? 3 : 1);
     if (!s.screenshotIds.length && screenshotsAvailable.size) s.warnings.push('No screenshot was captured for this step.');
-    if (!s.instructions.length) ask('steps', `Step ${i + 1} ("${s.title}") has no recognised actions. What is done in this step?`, s.id);
+    if (seg.reason === 'screen') ask('steps', `Step ${i + 1} was captured with screen sharing only, so the clicks are not known. What is done on this screen? (Rename the step and add the instructions.)`, s.id);
+    else if (!s.instructions.length) ask('steps', `Step ${i + 1} ("${s.title}") has no recognised actions. What is done in this step?`, s.id);
     if (seg.events.some((e) => e.type === 'input' && isPlaceholderValue(e.value) && !e.sensitive)) {
       ask('steps', `Step ${i + 1}: what value or format should be entered (${s.input || 'field'})? The typed value was not recorded for privacy reasons.`, s.id);
     }

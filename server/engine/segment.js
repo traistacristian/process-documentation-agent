@@ -100,8 +100,16 @@ export function segmentEvents(rawEvents) {
     steps.push(cur);
   };
 
+  // Recorded with screen sharing only (no extension or desktop agent): every meaningful screen change
+  // becomes its own step, so the document shows each screen instead of only the first one.
+  const screenOnly = !events.some((e) => INTERACTIONS.has(e.type));
   for (const ev of events) {
     if (['start', 'stop', 'heartbeat'].includes(ev.type)) continue;
+    if (screenOnly && ev.type === 'screenshot' && ev.screenshotId) {
+      if (!cur || cur.events.some((e) => e.screenshotId)) open(ev, 'screen');
+      cur.events.push(ev);
+      continue;
+    }
     if (ev.type === 'note') { (cur ?? open(ev, 'note') ?? cur).notes.push(ev.text); continue; }
     if (ev.type === 'mark') {
       open(lastLocEvent(steps) || ev, 'mark');
@@ -130,7 +138,7 @@ export function segmentEvents(rawEvents) {
   for (const s of steps) {
     const prev = merged[merged.length - 1];
     const interactive = s.events.some((e) => INTERACTIONS.has(e.type) || e.type === 'feedback');
-    if (prev && !prev.important && !prev.events.some((e) => INTERACTIONS.has(e.type)) && !prev.notes.length && s.reason !== 'application') {
+    if (prev && !prev.important && !prev.events.some((e) => INTERACTIONS.has(e.type)) && !prev.notes.length && s.reason !== 'application' && s.reason !== 'screen' && prev.reason !== 'screen') {
       s.events = [...prev.events, ...s.events];
       s.location = prev.location;
       merged[merged.length - 1] = s;
@@ -139,7 +147,7 @@ export function segmentEvents(rawEvents) {
   // A final step that only observed the result of the previous action (no interaction, no mark)
   // is the outcome of that action, not a step of its own.
   const tail = merged[merged.length - 1];
-  if (merged.length > 1 && !tail.important && !tail.notes.length && !tail.events.some((e) => INTERACTIONS.has(e.type)) && tail.events.every((e) => e.type !== 'navigate' || e.causedByAction)) {
+  if (merged.length > 1 && tail.reason !== 'screen' && !tail.important && !tail.notes.length && !tail.events.some((e) => INTERACTIONS.has(e.type)) && tail.events.every((e) => e.type !== 'navigate' || e.causedByAction)) {
     merged[merged.length - 2].events.push(...tail.events);
     merged.pop();
   }
