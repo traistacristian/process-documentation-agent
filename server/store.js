@@ -97,6 +97,15 @@ export class Store {
     if (p) fs.rmSync(p, { force: true });
   }
 
+  // Deletes a recording: its record, raw events and every screenshot not listed in keepShotIds
+  // (screenshots that an existing draft still shows are kept).
+  removeSession(sessionId, keepShotIds = new Set()) {
+    this.purgeRawCapture(sessionId, keepShotIds);
+    const dir = path.join(this.dir, 'screenshots', sessionId);
+    if (fs.existsSync(dir) && !fs.readdirSync(dir).length) fs.rmSync(dir, { recursive: true, force: true });
+    this.remove('sessions', sessionId);
+  }
+
   purgeRawCapture(sessionId, keepShotIds = new Set()) {
     fs.rmSync(this.#file('sessions', sessionId, '.events.jsonl'), { force: true });
     this.seqCache.delete(sessionId);

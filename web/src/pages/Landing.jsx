@@ -5,6 +5,13 @@ import { usePoll, fmtDate, StatusBadge } from '../util.jsx';
 export default function Landing({ me }) {
   const [d, setD] = useState(null); const [err, setErr] = useState(null);
   usePoll(async () => { try { setD(await api('/api/dashboard')); setErr(null); } catch (e) { setErr(e.message); } }, 8000);
+  const remove = async (kind, item) => {
+    const what = kind === 'drafts' ? 'draft' : 'recording';
+    const extra = kind === 'sessions' ? ' Its captured actions and screenshots are deleted too (screenshots used by a draft are kept).' : ' The recording it came from is kept.';
+    if (!window.confirm(`Delete the ${what} "${item.title || 'Untitled'}"? This cannot be undone.${extra}`)) return;
+    try { await api(`/api/${kind}/${item.id}`, { method: 'DELETE' }); setD(await api('/api/dashboard')); setErr(null); } catch (e) { setErr(e.message); }
+  };
+  const Del = ({ kind, item }) => (item.canDelete ? <button className="btn sm ghost" title="Delete" aria-label={`Delete ${item.title || 'item'}`} data-testid={`delete-${kind}`} onClick={() => remove(kind, item)}>Delete</button> : null);
   const interrupted = d?.recordings.filter((r) => ['recording', 'paused', 'stopped'].includes(r.status) && !r.draftId) || [];
 
   return (
@@ -54,13 +61,13 @@ export default function Landing({ me }) {
             <div className="panel">
               <h2>Drafts awaiting review or approval</h2>
               {d.drafts.length ? <ul className="list">{d.drafts.map((x) => (
-                <li key={x.id}><a href={`#/review/${x.id}`}>{x.title || 'Untitled'}</a><span className="row"><span className="small muted">{x.mode === 'update' ? 'Update' : 'New'} · {fmtDate(x.updatedAt)}</span><StatusBadge s={x.status} /></span></li>
+                <li key={x.id}><a href={`#/review/${x.id}`}>{x.title || 'Untitled'}</a><span className="row"><span className="small muted">{x.mode === 'update' ? 'Update' : 'New'} · {fmtDate(x.updatedAt)}</span><StatusBadge s={x.status} /><Del kind="drafts" item={x} /></span></li>
               ))}</ul> : <p className="empty">No drafts at the moment.</p>}
             </div>
             <div className="panel">
               <h2>Recording history</h2>
               {d.recordings.length ? <ul className="list">{d.recordings.map((r) => (
-                <li key={r.id}><a href={r.draftId ? `#/review/${r.draftId}` : `#/record/${r.id}`}>{r.title}</a><span className="row"><span className="small muted">{r.createdBy.name} · {fmtDate(r.startedAt)}</span><StatusBadge s={r.status} /></span></li>
+                <li key={r.id}><a href={r.draftId ? `#/review/${r.draftId}` : `#/record/${r.id}`}>{r.title}</a><span className="row"><span className="small muted">{r.createdBy.name} · {fmtDate(r.startedAt)}</span><StatusBadge s={r.status} /><Del kind="sessions" item={r} /></span></li>
               ))}</ul> : <p className="empty">No recordings yet.</p>}
             </div>
             <div className="panel">

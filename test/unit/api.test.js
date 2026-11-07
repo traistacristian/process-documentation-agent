@@ -157,3 +157,21 @@ test('admin can change categories; non-admins cannot', async () => {
   assert.equal((await call('PUT', '/api/admin/settings', { categories: ['Microsoft 365', 'Security Operations'] })).status, 200);
   assert.deepEqual((await call('GET', '/api/config')).body.categories, ['Microsoft 365', 'Security Operations']);
 });
+
+test('drafts and recordings can be deleted one by one by their owner or an Admin', async () => {
+  const { s } = await recordAndGenerate();
+  assert.equal((await call('DELETE', `/api/sessions/${s.id}`, null, 'alex')).status, 409, 'an active recording must be stopped first');
+  await call('POST', `/api/sessions/${s.id}/control`, { action: 'stop' }, 'alex');
+  const g = await call('POST', `/api/sessions/${s.id}/generate`, {}, 'alex');
+  const d = await waitDraft(g.body.id);
+  const shots = d.doc.steps.flatMap((st) => st.screenshotIds);
+  assert.equal((await call('DELETE', `/api/drafts/${d.id}`, null, 'sam')).status, 403, 'an approver who did not create it cannot delete it');
+  // Deleting the recording keeps the screenshots the draft still shows.
+  assert.equal((await call('DELETE', `/api/sessions/${s.id}`, null, 'alex')).status, 200);
+  assert.equal((await call('GET', `/api/sessions/${s.id}`, null, 'alex')).status, 404);
+  if (shots.length) assert.equal((await fetch(`${base}/api/drafts/${d.id}/screenshots/${shots[0]}`, { headers: { 'x-dev-user': 'alex' } })).status, 200);
+  assert.equal((await call('DELETE', `/api/drafts/${d.id}`, null, 'alex')).status, 200);
+  assert.equal((await call('GET', `/api/drafts/${d.id}`, null, 'alex')).status, 404);
+  const log = (await call('GET', '/api/admin/audit', null, 'admin')).body.map((e) => e.action);
+  assert.ok(log.includes('session.deleted') && log.includes('draft.deleted'));
+});

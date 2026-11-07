@@ -44,6 +44,13 @@ export function createApp(cfg, deps = {}) {
   };
   const isApprover = (u) => u.roles.includes(ROLES.APPROVER) || u.roles.includes(ROLES.ADMIN);
   const canSeeSession = (u, s) => s.createdBy.id === u.id || isApprover(u);
+  // Deleting is limited to the person who created the item, or an Admin.
+  const canDelete = (u, item) => item.createdBy?.id === u.id || u.roles.includes(ROLES.ADMIN);
+  const shotsUsedByDrafts = (sessionId) => {
+    const keep = new Set();
+    for (const d of store.list('drafts')) if (d.sessionId === sessionId) for (const st of d.doc?.steps || []) for (const id of st.screenshotIds || []) keep.add(id);
+    return keep;
+  };
   const engineName = () => (aiAvailable(cfg) ? `claude (${cfg.ai.model}${aiProvider(cfg) === 'foundry' ? ', Microsoft Foundry' : ''})` : 'rules');
   const publicSession = (s) => { const { captureTokenHash, ...rest } = s; return rest; };
 
@@ -194,6 +201,15 @@ export function createApp(cfg, deps = {}) {
     res.json({ ...publicSession(s), recentEvents: events.slice(-30).reverse(), screenshotCount: store.listScreenshots(s.id).length });
   }));
 
+  app.delete('/api/sessions/:id', wrap(async (req, res) => {
+    const s = loadSession(req);
+    if (!canDelete(req.user, s)) throw httpError(403, 'Only the person who recorded it or an Admin can delete this recording');
+    if (['recording', 'paused'].includes(s.status)) throw httpError(409, 'Stop the recording before deleting it');
+    store.removeSession(s.id, shotsUsedByDrafts(s.id));
+    audit.write(req.user, 'session.deleted', { sessionId: s.id, title: s.meta.title });
+    res.json({ ok: true });
+  }));
+
   app.post('/api/sessions/:id/control', wrap(async (req, res) => {
     const s = loadSession(req);
     const action = req.body?.action;
@@ -308,6 +324,19 @@ export function createApp(cfg, deps = {}) {
     res.json(all.map((d) => ({ id: d.id, mode: d.mode, status: d.status, title: d.doc?.info.title || store.get('sessions', d.sessionId)?.meta.title, processId: d.doc?.info.processId || d.baseRef?.processId, createdBy: d.createdBy, updatedAt: d.updatedAt, engine: d.engine, openClarifications: d.clarifications.filter((c) => c.status === 'open').length })));
   }));
   app.get('/api/drafts/:id', wrap(async (req, res) => res.json(draftView(loadDraft(req)))));
+
+  app.delete('/api/drafts/:id', wrap(async (req, res) => {
+    const d = loadDraft(req);
+    if (!canDelete(req.user, d)) throw httpError(403, 'Only the person who created it or an Admin can delete this draft');
+    if (['generating', 'publishing'].includes(d.status)) throw httpError(409, 'Wait until the draft has finished generating or publishing');
+    store.remove('drafts', d.id);
+    const s = store.get('sessions', d.sessionId);
+    if (s && s.draftId === d.id) { s.draftId = null; store.put('sessions', s); }
+    // Screenshots only this draft still used go when the recording itself is already gone.
+    if (!s) { const keep = shotsUsedByDrafts(d.sessionId); for (const id of store.listScreenshots(d.sessionId)) if (!keep.has(id)) store.deleteScreenshot(d.sessionId, id); }
+    audit.write(req.user, 'draft.deleted', { draftId: d.id, sessionId: d.sessionId, status: d.status, title: d.doc?.info.title });
+    res.json({ ok: true });
+  }));
 
   app.put('/api/drafts/:id', wrap(async (req, res) => {
     const d = loadDraft(req);
@@ -445,8 +474,8 @@ export function createApp(cfg, deps = {}) {
       recentlyCreated: processes.filter((p) => p.version === '1.0').slice(0, 5),
       recentlyUpdated: processes.filter((p) => p.version !== '1.0').slice(0, 5),
       drafts: drafts.filter((d) => ['draft', 'approved', 'rejected', 'generating', 'failed'].includes(d.status)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8)
-        .map((d) => ({ id: d.id, status: d.status, mode: d.mode, title: d.doc?.info.title || store.get('sessions', d.sessionId)?.meta.title, updatedAt: d.updatedAt, createdBy: d.createdBy })),
-      recordings: sessions.slice(0, 10).map((s) => ({ id: s.id, title: s.meta.title, mode: s.mode, status: s.status, startedAt: s.startedAt, stoppedAt: s.stoppedAt, eventCount: s.eventCount, draftId: s.draftId, createdBy: s.createdBy })),
+        .map((d) => ({ id: d.id, status: d.status, mode: d.mode, title: d.doc?.info.title || store.get('sessions', d.sessionId)?.meta.title, updatedAt: d.updatedAt, createdBy: d.createdBy, canDelete: canDelete(req.user, d) && !['generating', 'publishing'].includes(d.status) })),
+      recordings: sessions.slice(0, 10).map((s) => ({ id: s.id, title: s.meta.title, mode: s.mode, status: s.status, startedAt: s.startedAt, stoppedAt: s.stoppedAt, eventCount: s.eventCount, draftId: s.draftId, createdBy: s.createdBy, canDelete: canDelete(req.user, s) && !['recording', 'paused'].includes(s.status) })),
     });
   }));
 

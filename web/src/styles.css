@@ -58,6 +58,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand-soft)
 .btn.danger { background: var(--rec); border-color: var(--rec); color: #fff; }
 .btn.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
 .btn.big { padding: 12px 22px; font-size: 15px; }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--rec); padding: 4px 8px; font-weight: 500; }
+.btn.ghost:hover:not(:disabled) { background: #fdecec; }
 .btn.sm { padding: 4px 9px; font-size: 12px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .between { justify-content: space-between; }
