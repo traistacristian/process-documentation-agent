@@ -215,7 +215,7 @@ function StepDescriptions({ id, status }) {
   usePoll(async () => { try { setSteps(await api(`/api/sessions/${id}/steps`)); } catch (e) { setErr(e.message); } }, 3000, [id]);
   const save = async (st) => {
     const text = edit[st.firstSeq];
-    if (text === undefined || text === st.description) return;
+    if (text === undefined || text === (st.description || st.suggested)) return;
     try {
       await api(`/api/sessions/${id}/step-descriptions`, { method: 'PUT', body: { seq: st.firstSeq, text } });
       setSaved((x) => ({ ...x, [st.firstSeq]: Date.now() }));
@@ -226,14 +226,14 @@ function StepDescriptions({ id, status }) {
   if (!steps) return null;
   return (
     <div className="panel">
-      <h2>Steps so far: your description</h2>
-      <p className="small muted">After each step, describe in your own words what you did and why. You can change any description at any time, during the recording or on the review page. The text is added to that step in the document.</p>
+      <h2>Steps so far</h2>
+      <p className="small muted">Each step is described automatically from what was recognised. Check it and correct it only if it is wrong; your correction replaces the automatic text in the document. You can also change it later on the review page.</p>
       {err && <div className="alert err small">{err}</div>}
       {steps.length ? <ol className="list" data-testid="step-descriptions" style={{ paddingLeft: 0 }}>{steps.map((st) => (
         <li key={st.firstSeq ?? st.number} style={{ display: 'block' }}>
-          <div className="row" style={{ justifyContent: 'space-between' }}><b>{st.number}. {st.title}</b>{saved[st.firstSeq] && <span className="small muted">saved</span>}</div>
-          <textarea data-testid="step-description" rows={2} style={{ width: '100%', marginTop: 6 }} placeholder="What did you do in this step, and why?"
-            value={edit[st.firstSeq] ?? st.description}
+          <div className="row" style={{ justifyContent: 'space-between' }}><b>{st.number}. {st.title}</b><span className="small muted">{saved[st.firstSeq] ? 'saved' : st.description ? 'edited by you' : st.suggested ? 'automatic' : ''}</span></div>
+          <textarea data-testid="step-description" rows={2} style={{ width: '100%', marginTop: 6 }} placeholder={st.screenOnly ? 'Screen sharing shows the screen but not your clicks: describe what you did here.' : 'What did you do in this step?'}
+            value={edit[st.firstSeq] ?? (st.description || st.suggested)}
             onChange={(e) => setEdit((x) => ({ ...x, [st.firstSeq]: e.target.value }))}
             onBlur={() => save(st)} disabled={st.firstSeq == null || status === 'generated'} />
         </li>

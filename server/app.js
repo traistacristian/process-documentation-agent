@@ -207,7 +207,7 @@ export function createApp(cfg, deps = {}) {
     const s = loadSession(req);
     const shots = new Set(store.listScreenshots(s.id));
     const { doc } = applyStepDescriptions(generateWithRules({ meta: s.meta, events: store.readEvents(s.id), screenshotsAvailable: shots, base: null, user: req.user }), s.stepDescriptions);
-    res.json(doc.steps.map((st) => ({ key: st.evidenceEventSeqs[st.evidenceEventSeqs.length - 1] ?? null, firstSeq: st.evidenceEventSeqs[0] ?? null, number: st.number, title: st.title, screenshotId: st.screenshotIds[0] || null, description: findDescription(st, s.stepDescriptions) })));
+    res.json(doc.steps.map((st) => ({ key: st.evidenceEventSeqs[st.evidenceEventSeqs.length - 1] ?? null, firstSeq: st.evidenceEventSeqs[0] ?? null, number: st.number, title: st.title, screenshotId: st.screenshotIds[0] || null, description: findDescription(st, s.stepDescriptions), suggested: [...st.instructions, st.expectedResult].filter(Boolean).join(' '), screenOnly: /^Screen \d+ \(describe the action\)$/.test(st.title) })));
   }));
   app.put('/api/sessions/:id/step-descriptions', wrap(async (req, res) => {
     const s = loadSession(req);

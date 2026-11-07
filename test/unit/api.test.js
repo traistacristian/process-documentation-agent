@@ -180,6 +180,8 @@ test('the author describes each step during recording; the text lands in the doc
   const { s } = await recordAndGenerate();
   const steps = (await call('GET', `/api/sessions/${s.id}/steps`, null, 'alex')).body;
   assert.equal(steps.length, 2);
+  assert.match(steps[1].suggested, /Click "Save"/, 'an automatic description is proposed from what was recognised');
+  assert.equal(steps[1].description, '');
   assert.equal((await call('PUT', `/api/sessions/${s.id}/step-descriptions`, { seq: steps[0].firstSeq, text: 'Find the user' }, 'sam')).status, 403, 'only the recorder describes steps');
   await call('PUT', `/api/sessions/${s.id}/step-descriptions`, { seq: steps[0].firstSeq, text: 'Find the user' }, 'alex');
   await call('PUT', `/api/sessions/${s.id}/step-descriptions`, { seq: steps[0].firstSeq, text: 'Find the user who asked for access' }, 'alex');
