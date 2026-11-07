@@ -15,6 +15,7 @@ Then load `extension/` as an unpacked extension in Edge/Chrome and start a recor
 | Document | Contents |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Hybrid architecture, capture components, diagram, stack, phase status |
+| [docs/Process-Documentation-Agent-Architecture.pptx](docs/Process-Documentation-Agent-Architecture.pptx) | Architecture presentation (as deployed, November 2026) |
 | [docs/REQUIREMENTS-AND-TESTING.md](docs/REQUIREMENTS-AND-TESTING.md) | Functional requirements, acceptance criteria, automated and manual test scenarios |
 | [docs/SECURITY.md](docs/SECURITY.md) | Roles, capture safeguards, GDPR, AI data handling |
 | [docs/GO-LIVE.md](docs/GO-LIVE.md) | **Production go-live**: Azure deployment, Entra/SharePoint setup script, GitHub Actions, client rollout, pilot |
