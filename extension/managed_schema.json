@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "allowedServers": {
+      "title": "Allowed Process Documentation Agent servers",
+      "description": "Origins the extension may pair with, e.g. https://pda-app-xxxx.azurewebsites.net. Empty = any.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "serverUrl": {
+      "title": "Default server address",
+      "description": "Pre-filled in the extension popup for manual pairing.",
+      "type": "string"
+    }
+  }
+}

@@ -57,3 +57,22 @@ test('request uses structured output, adaptive thinking, fallbacks and sends scr
 test('malformed model output is rejected (the API then falls back to the rule engine)', async () => {
   await assert.rejects(generateWithClaude({ cfg: loadConfig(), meta: { title: 'x' }, events: v1Events(), screenshots: [], base: null, user: {}, client: fakeClient('{"doc": 1}', {}) }));
 });
+
+test('AI provider selection: Foundry, Claude API, rules', async () => {
+  const { aiProvider, createClient } = await import('../../server/engine/generate-llm.js');
+  const saved = { ...process.env };
+  try {
+    for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_FOUNDRY_RESOURCE', 'ANTHROPIC_FOUNDRY_BASE_URL', 'ANTHROPIC_FOUNDRY_API_KEY']) delete process.env[k];
+    const cfg = (provider, foundry) => ({ ai: { provider, foundry } });
+    assert.equal(aiProvider(cfg('auto')), null);
+    assert.equal(aiProvider(cfg('rules')), null);
+    process.env.ANTHROPIC_API_KEY = 'x';
+    assert.equal(aiProvider(cfg('auto')), 'anthropic');
+    assert.equal(aiProvider(cfg('rules')), null);
+    assert.equal(aiProvider(cfg('auto', { resource: 'contoso-ai' })), 'foundry');
+    process.env.ANTHROPIC_FOUNDRY_API_KEY = 'k';
+    const c = await createClient(cfg('foundry', { resource: 'contoso-ai' }));
+    assert.equal(c.constructor.name, 'AnthropicFoundry');
+    assert.match(c.baseURL, /contoso-ai\.services\.ai\.azure\.com\/anthropic/);
+  } finally { process.env = saved; }
+});

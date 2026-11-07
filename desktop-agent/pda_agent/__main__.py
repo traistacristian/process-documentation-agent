@@ -2,6 +2,8 @@
 
 Usage:
     python -m pda_agent --server https://processdocs.contoso.com --code 123456
+    ProcessDocAgent.exe            (installed version: asks for the pairing code; the server comes
+                                    from the machine policy set by IT)
 
 The pairing code is shown on the recording screen of the web app. The agent then captures desktop
 activity (foreground application, clicked UI elements, field entry without the typed text, keyboard
@@ -20,6 +22,7 @@ import threading
 import time
 from pathlib import Path
 
+from . import machine_policy
 from .core import ApiClient, DurableQueue, EventBuilder, Policy, Uploader
 from .platforms import detect_provider
 
@@ -85,12 +88,72 @@ class Indicator:
             time.sleep(1)
 
 
+def ask_pairing(server: str | None, code: str | None):
+    """Small dialog for the installed agent: pairing code (and server, if IT did not set one)."""
+    try:
+        import tkinter as tk
+    except Exception:
+        server = server or input("Server address: ").strip()
+        code = code or input("Pairing code: ").strip()
+        return (server, code) if server and code else None
+    result = {}
+    root = tk.Tk()
+    root.title("Process Documentation Agent")
+    root.attributes("-topmost", True)
+    tk.Label(root, text="Enter the pairing code shown on the recording screen.", padx=12, pady=8).grid(row=0, column=0, columnspan=2)
+    srv = tk.StringVar(value=server or "")
+    cod = tk.StringVar(value=code or "")
+    row = 1
+    if not server:
+        tk.Label(root, text="Server").grid(row=row, column=0, sticky="e", padx=6)
+        tk.Entry(root, textvariable=srv, width=40).grid(row=row, column=1, padx=6, pady=4)
+        row += 1
+    tk.Label(root, text="Pairing code").grid(row=row, column=0, sticky="e", padx=6)
+    e = tk.Entry(root, textvariable=cod, width=12, font=("Segoe UI", 14))
+    e.grid(row=row, column=1, sticky="w", padx=6, pady=4)
+    e.focus_set()
+
+    def ok(*_):
+        if srv.get().strip() and cod.get().strip():
+            result["v"] = (srv.get().strip(), cod.get().strip())
+            root.destroy()
+    tk.Button(root, text="Start capture", command=ok).grid(row=row + 1, column=1, sticky="e", padx=6, pady=8)
+    root.bind("<Return>", ok)
+    root.mainloop()
+    return result.get("v")
+
+
+def show_error(text: str) -> None:
+    print(text, file=sys.stderr)
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        r = tk.Tk(); r.withdraw(); messagebox.showerror("Process Documentation Agent", text); r.destroy()
+    except Exception:
+        pass
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pda_agent", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--server", required=True, help="Base URL of the Process Documentation Agent")
-    ap.add_argument("--code", required=True, help="6-digit pairing code from the recording screen")
+    ap.add_argument("--server", help="Base URL of the Process Documentation Agent (default: machine policy)")
+    ap.add_argument("--code", help="6-digit pairing code from the recording screen (asked for if omitted)")
     ap.add_argument("--queue", default=str(Path.home() / ".pda_agent" / "queue.jsonl"))
     args = ap.parse_args(argv)
+
+    mpol = machine_policy.load()
+    if not args.server:
+        args.server = mpol["serverUrl"]
+    if not args.server or not args.code:
+        asked = ask_pairing(args.server, args.code)
+        if not asked:
+            return 1
+        args.server, args.code = asked
+    args.server = args.server.strip().rstrip("/")
+    try:
+        machine_policy.check_server(args.server, mpol)
+    except ValueError as e:
+        show_error(str(e))
+        return 3
 
     try:
         from pynput import keyboard, mouse
@@ -99,7 +162,11 @@ def main(argv=None) -> int:
         return 2
 
     client = ApiClient(args.server)
-    info = client.pair(args.code, platform.node())
+    try:
+        info = client.pair(args.code, platform.node())
+    except Exception as e:
+        show_error(f"Could not pair with {args.server}: {e}")
+        return 4
     policy = Policy.from_server(info.get("policy", {}))
     q = DurableQueue(Path(args.queue))
     uploader = Uploader(client, q)

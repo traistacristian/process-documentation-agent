@@ -105,3 +105,17 @@ test('missing configuration and throttling are handled', async () => {
   assert.equal((await new SharePointRepository(cfg(), { fetchImpl: throttled, sleep: async () => {} }).status()).connected, true);
   assert.equal(n, 3);
 });
+
+test('managed identity: Graph token comes from the App Service identity, no secret needed', async () => {
+  const g = fakeGraph();
+  const c = cfg(); c.repository.sharepoint.clientSecret = ''; c.repository.sharepoint.auth = 'managedIdentity';
+  let scopes = [];
+  const credential = { getToken: async (s) => { scopes.push(s); return { token: 'mi-token', expiresOnTimestamp: Date.now() + 3600_000 }; } };
+  const seen = [];
+  const fetchImpl = (url, opt = {}) => { seen.push(opt.headers?.authorization); return g.fetchImpl(url, opt); };
+  const repo = new SharePointRepository(c, { fetchImpl, sleep: async () => {}, credential });
+  assert.equal((await repo.status()).connected, true);
+  assert.deepEqual([...new Set(scopes)], ['https://graph.microsoft.com/.default']);
+  assert.ok(seen.every((h) => h === 'Bearer mi-token'));
+  assert.ok(!g.calls.some((x) => x.includes('oauth2')));
+});

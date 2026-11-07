@@ -1,11 +1,37 @@
 {
   "manifest_version": 3,
   "name": "Process Documentation Agent – Capture",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Captures the steps of an IT process in the browser while a Process Documentation Agent recording is active.",
-  "permissions": ["storage", "tabs", "alarms"],
-  "host_permissions": ["<all_urls>"],
-  "background": { "service_worker": "background.js" },
-  "content_scripts": [{ "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_start", "all_frames": false }],
-  "action": { "default_popup": "popup.html", "default_title": "Process Documentation Agent – not recording" }
+  "permissions": [
+    "storage",
+    "tabs",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Process Documentation Agent – not recording"
+  },
+  "storage": {
+    "managed_schema": "managed_schema.json"
+  }
 }

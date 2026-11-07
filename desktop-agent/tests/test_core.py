@@ -114,3 +114,21 @@ class QueueAndUploadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MachinePolicyTests(unittest.TestCase):
+    def test_allowlist_and_https(self):
+        import json, tempfile
+        from pda_agent import machine_policy as mp
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "policy.json"
+            f.write_text(json.dumps({"serverUrl": "https://pda.contoso.com", "allowedServers": "https://PDA.contoso.com/;https://pda2.contoso.com"}))
+            pol = mp.load([f])
+        self.assertEqual(pol["serverUrl"], "https://pda.contoso.com")
+        self.assertEqual(pol["allowedServers"], ["https://pda.contoso.com", "https://pda2.contoso.com"])
+        mp.check_server("https://pda.contoso.com/", pol)
+        with self.assertRaises(ValueError):
+            mp.check_server("https://evil.example.com", pol)
+        with self.assertRaises(ValueError):
+            mp.check_server("http://pda.contoso.com", {"allowedServers": []})
+        mp.check_server("http://localhost:3000", {"allowedServers": []})

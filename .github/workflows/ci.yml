@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    name: Server, web app and end-to-end tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+      - name: End-to-end (real Chromium + extension)
+        run: |
+          npm i --no-save playwright@1
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Package the app (production dependencies only)
+        run: |
+          npm ci --omit=dev
+          zip -qr app.zip server config web/dist package.json package-lock.json node_modules -x 'config/local.json'
+      - uses: actions/upload-artifact@v4
+        with: { name: app, path: app.zip, retention-days: 30 }
+
+  extension:
+    name: Browser extension package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          v=$(jq -r .version extension/manifest.json)
+          (cd extension && zip -qr "../pda-extension-$v.zip" .)
+          echo "EXT_ZIP=pda-extension-$v.zip" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with: { name: extension, path: '${{ env.EXT_ZIP }}' }
+
+  desktop-agent:
+    name: Windows desktop agent
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: py -m pip install -r desktop-agent/requirements.txt pyinstaller
+      - run: py -m unittest discover -s desktop-agent/tests
+      - name: Smoke-test the Windows platform layer (UI Automation, pynput, mss import and initialise)
+        working-directory: desktop-agent
+        continue-on-error: true  # hosted runners may not have an interactive desktop
+        run: py -c "from pda_agent.platforms import detect_provider; p = detect_provider(); print(p.name); import mss, pynput; print('ok')"
+      - run: py -m PyInstaller deploy/desktop-agent/pda_agent.spec --distpath dist --workpath build --noconfirm
+      - name: Assemble the Intune package folder
+        shell: pwsh
+        run: |
+          New-Item intune -ItemType Directory | Out-Null
+          Copy-Item dist/ProcessDocAgent intune/ProcessDocAgent -Recurse
+          Copy-Item deploy/desktop-agent/Install-ProcessDocAgent.ps1 intune/
+      - uses: actions/upload-artifact@v4
+        with: { name: desktop-agent-intune, path: intune }
+
+  infra:
+    name: Bicep and PowerShell checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: az bicep build --file infra/main.bicep --stdout > /dev/null
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $r = Invoke-ScriptAnalyzer -Path scripts, deploy -Recurse -Severity Error
+          $r | Format-Table -AutoSize
+          if ($r) { exit 1 }

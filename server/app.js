@@ -9,7 +9,7 @@ import { createAuth, ROLES } from './auth.js';
 import { saveAdminSettings } from './config.js';
 import { sanitizeEvent } from './engine/redact.js';
 import { generateWithRules } from './engine/generate-rules.js';
-import { generateWithClaude, aiAvailable } from './engine/generate-llm.js';
+import { generateWithClaude, aiAvailable, aiProvider } from './engine/generate-llm.js';
 import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from './engine/compare.js';
 import { normalizeDoc } from './engine/schema.js';
 import { applyAnswer } from './engine/clarify.js';
@@ -29,8 +29,13 @@ export function createApp(cfg, deps = {}) {
   const generators = { rules: generateWithRules, claude: deps.generateWithClaude || generateWithClaude };
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', 1); // behind App Service / Front Door: honour X-Forwarded-Proto/For once
   app.use(express.json({ limit: '15mb' }));
-  app.use((req, res, next) => { res.set({ 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY' }); next(); });
+  // Liveness/readiness for App Service health checks. No auth, no data.
+  app.get('/healthz', (req, res) => {
+    try { store.ping?.(); res.json({ ok: true }); } catch (e) { res.status(503).json({ ok: false, error: 'storage unavailable' }); }
+  });
+  app.use((req, res, next) => { res.set({ 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY', ...(req.secure ? { 'strict-transport-security': 'max-age=31536000' } : {}) }); next(); });
 
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
   const notify = async (event, payload) => {
@@ -39,7 +44,7 @@ export function createApp(cfg, deps = {}) {
   };
   const isApprover = (u) => u.roles.includes(ROLES.APPROVER) || u.roles.includes(ROLES.ADMIN);
   const canSeeSession = (u, s) => s.createdBy.id === u.id || isApprover(u);
-  const engineName = () => (aiAvailable(cfg) ? `claude (${cfg.ai.model})` : 'rules');
+  const engineName = () => (aiAvailable(cfg) ? `claude (${cfg.ai.model}${aiProvider(cfg) === 'foundry' ? ', Microsoft Foundry' : ''})` : 'rules');
   const publicSession = (s) => { const { captureTokenHash, ...rest } = s; return rest; };
 
   // ---------------------------------------------------------------- public config

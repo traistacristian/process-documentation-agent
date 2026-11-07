@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "namePrefix": { "value": "pda" },
+    "sharePointSiteUrl": { "value": "https://REPLACE.sharepoint.com/sites/REPLACE" },
+    "sharePointLibrary": { "value": "Documents" },
+    "aiProvider": { "value": "foundry" },
+    "foundryResourceName": { "value": "" },
+    "appServiceSku": { "value": "P0v3" }
+  }
+}

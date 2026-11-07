@@ -56,7 +56,18 @@ function excluded(url, policy) {
   } catch { return false; }
 }
 
+// Enterprise policy (Intune / Group Policy, see deploy/extension-policy): when allowedServers is set,
+// the extension only pairs with those origins, so a look-alike site cannot start a capture.
+async function managed() {
+  try { return (await chrome.storage.managed.get(['allowedServers', 'serverUrl'])) || {}; } catch { return {}; }
+}
+
 async function pair(code, apiBase) {
+  const { allowedServers } = await managed();
+  let origin = null; try { origin = new URL(apiBase).origin; } catch { return { ok: false, error: 'Invalid server address.' }; }
+  if (Array.isArray(allowedServers) && allowedServers.length && !allowedServers.map((a) => { try { return new URL(a).origin; } catch { return a; } }).includes(origin)) {
+    return { ok: false, error: `Your organisation only allows recording with ${allowedServers.join(', ')}.` };
+  }
   const res = await fetch(`${apiBase}/api/capture/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, client: { type: 'browser-extension', version: chrome.runtime.getManifest().version, host: navigator.userAgent.slice(0, 80) } }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: body.error || `HTTP ${res.status}` };
@@ -131,6 +142,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     if (msg.type === 'hello') return contentState();
     if (msg.type === 'status') { const s = await get(); return { status: s.status, title: s.title, queued: s.queue.length, paired: !!s.token }; }
     if (msg.type === 'pair') return pair(String(msg.code || ''), msg.apiBase);
+    if (msg.type === 'managed') return managed();
     if (msg.type === 'unpair') { await reset('Disconnected by user'); return { ok: true }; }
     if (msg.type === 'event') {
       const s = await get();

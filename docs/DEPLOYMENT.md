@@ -1,5 +1,7 @@
 # Deployment and configuration
 
+For production, follow [GO-LIVE.md](GO-LIVE.md): Bicep template (`infra/`), setup script (`scripts/`), GitHub Actions (`.github/workflows/`) and client packaging (`deploy/`). This page covers local runs and the configuration reference.
+
 ## Run the prototype locally (no tenant needed)
 
 ```bash
@@ -32,11 +34,21 @@ py -m pda_agent --server http://localhost:3000 --code <pairing code from the rec
 | `ENTRA_TENANT_ID`, `ENTRA_API_CLIENT_ID`, `ENTRA_SPA_CLIENT_ID` | Entra app registrations (plus `auth.entra.apiScope` in config, e.g. `api://<api-client-id>/access_as_user`) |
 | `PDA_REPOSITORY_MODE` | `local` or `sharepoint` |
 | `SP_TENANT_ID`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET`, `SP_SITE_URL`, `SP_LIBRARY` | SharePoint destination and the backend app's credentials |
-| `ANTHROPIC_API_KEY` | Enables the Claude documentation engine (`PDA_AI_PROVIDER=rules` forces the rule engine) |
+| `ENTRA_API_SCOPE` | Optional; defaults to `api://<api-client-id>/access_as_user` |
+| `SP_AUTH` | `managedIdentity` (production: App Service identity, no secret) or `secret` (uses `SP_CLIENT_SECRET`) |
+| `SP_ROOT_FOLDER` | Top-level folder in the library (default `IT Process Documentation`) |
+| `PDA_AI_PROVIDER` | `auto`, `foundry`, `anthropic` or `rules` |
+| `ANTHROPIC_FOUNDRY_RESOURCE` | Claude in Microsoft Foundry; authenticates with the managed identity, or `ANTHROPIC_FOUNDRY_API_KEY` |
+| `ANTHROPIC_API_KEY` | Claude API (in Azure: a Key Vault reference) |
+| `ANTHROPIC_MODEL` | Default `claude-opus-5-5` |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | Enables Azure Monitor telemetry; audit entries are sent as `audit.*` custom events |
+| `PDA_REQUIRE_SEPARATE_APPROVER` | `true` = the recorder cannot approve their own process |
 
 Categories, capture policy, retention and the Power Automate webhook are edited by Admins in the Administration page (stored in `<dataDir>/settings.json`).
 
-## Microsoft 365 / Azure setup
+## Microsoft 365 / Azure setup (manual equivalent of the script)
+
+The setup script in `scripts/Setup-EntraAndSharePoint.ps1` performs these steps automatically and uses the App Service managed identity instead of a client secret.
 
 1. **API app registration** (Entra ID → App registrations → New):
    - Expose an API: Application ID URI `api://<client-id>`, scope `access_as_user`.
@@ -60,5 +72,7 @@ Categories, capture policy, retention and the Power Automate webhook are edited 
 
 - No Entra tenant: `entra` auth mode and MSAL sign-in are implemented but untested.
 - No SharePoint tenant: the Graph adapter is tested only against a mocked Graph.
-- No Anthropic API key: the Claude engine is tested only with a fake client; the app falls back to the rule engine if the model call fails.
+- No Anthropic API key or Foundry resource: the Claude engine is tested only with a fake client; the app falls back to the rule engine if the model call fails.
+- Bicep, PowerShell and the Windows agent build are validated by GitHub Actions (`az bicep build`, PSScriptAnalyzer, PyInstaller on `windows-latest`), not in this environment.
+- The app refuses to start in `dev` auth mode on Azure App Service unless `PDA_ALLOW_DEV_AUTH=true`.
 - No Windows desktop: the desktop agent's platform layer (UI Automation, pynput, mss) has not been run.

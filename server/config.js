@@ -38,12 +38,20 @@ export function loadConfig(overrides = {}) {
   if (env.ENTRA_TENANT_ID) cfg.auth.entra.tenantId = env.ENTRA_TENANT_ID;
   if (env.ENTRA_API_CLIENT_ID) cfg.auth.entra.apiClientId = env.ENTRA_API_CLIENT_ID;
   if (env.ENTRA_SPA_CLIENT_ID) cfg.auth.entra.spaClientId = env.ENTRA_SPA_CLIENT_ID;
+  if (env.ENTRA_API_SCOPE) cfg.auth.entra.apiScope = env.ENTRA_API_SCOPE;
+  if (env.PDA_REQUIRE_SEPARATE_APPROVER) cfg.auth.requireSeparateApprover = env.PDA_REQUIRE_SEPARATE_APPROVER === 'true';
+  if (env.ANTHROPIC_MODEL) cfg.ai.model = env.ANTHROPIC_MODEL;
+  if (env.ANTHROPIC_FOUNDRY_RESOURCE) cfg.ai.foundry = { ...(cfg.ai.foundry || {}), resource: env.ANTHROPIC_FOUNDRY_RESOURCE };
+  if (env.PDA_PUBLIC_URL) cfg.publicUrl = env.PDA_PUBLIC_URL;
   if (env.SP_TENANT_ID) cfg.repository.sharepoint.tenantId = env.SP_TENANT_ID;
   if (env.SP_CLIENT_ID) cfg.repository.sharepoint.clientId = env.SP_CLIENT_ID;
   if (env.SP_SITE_URL) cfg.repository.sharepoint.siteUrl = env.SP_SITE_URL;
+  if (env.SP_AUTH) cfg.repository.sharepoint.auth = env.SP_AUTH;
+  if (env.SP_ROOT_FOLDER) cfg.repository.sharepoint.rootFolder = env.SP_ROOT_FOLDER;
   if (env.SP_LIBRARY) cfg.repository.sharepoint.libraryName = env.SP_LIBRARY;
 
   cfg = deepMerge(cfg, overrides);
+  if (cfg.auth.entra.apiClientId && !cfg.auth.entra.apiScope) cfg.auth.entra.apiScope = `api://${cfg.auth.entra.apiClientId}/access_as_user`;
   cfg.dataDir = path.resolve(ROOT, cfg.dataDir);
   if (cfg.repository.local?.path) cfg.repository.local.path = path.resolve(ROOT, cfg.repository.local.path.replace('./data', cfg.dataDir));
 

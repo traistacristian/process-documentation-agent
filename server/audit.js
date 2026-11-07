@@ -4,11 +4,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export class AuditLog {
-  constructor(dataDir) { this.file = path.join(dataDir, 'audit.jsonl'); }
+  constructor(dataDir) { this.file = path.join(dataDir, 'audit.jsonl'); this.sinks = []; }
+
+  // Extra destinations (e.g. Application Insights custom events). A failing sink never blocks the log.
+  addSink(fn) { this.sinks.push(fn); }
 
   write(user, action, details = {}) {
     const entry = { ts: new Date().toISOString(), user: user ? { id: user.id, name: user.name } : null, action, ...details };
     fs.appendFileSync(this.file, JSON.stringify(entry) + '\n');
+    for (const sink of this.sinks) { try { sink(entry); } catch { /* monitoring must not break the workflow */ } }
     return entry;
   }
 

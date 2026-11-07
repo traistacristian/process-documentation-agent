@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
+import { AnthropicFoundry } from '@anthropic-ai/foundry-sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 import { DocSchema, normalizeDoc } from './schema.js';
@@ -19,9 +20,34 @@ const LlmOutput = z.object({
   suggestions: z.array(z.string()),
 });
 
+// Which Claude endpoint to use. 'anthropic' = Claude API, 'foundry' = Claude in Microsoft Foundry
+// (keeps processing under the Microsoft agreement), 'rules' = no AI, 'auto' = whatever is configured.
+export function aiProvider(cfg) {
+  const p = cfg.ai.provider;
+  if (p === 'rules') return null;
+  const hasFoundry = Boolean(process.env.ANTHROPIC_FOUNDRY_RESOURCE || process.env.ANTHROPIC_FOUNDRY_BASE_URL || cfg.ai.foundry?.resource);
+  // An unresolved App Service Key Vault reference arrives as the literal "@Microsoft.KeyVault(...)".
+  const key = process.env.ANTHROPIC_API_KEY;
+  const hasAnthropic = Boolean((key && !key.startsWith('@Microsoft.KeyVault(')) || process.env.ANTHROPIC_AUTH_TOKEN);
+  if (p === 'foundry') return 'foundry';
+  if (p === 'anthropic' || p === 'claude') return 'anthropic';
+  if (hasFoundry) return 'foundry';
+  if (hasAnthropic) return 'anthropic';
+  return null;
+}
+
 export function aiAvailable(cfg) {
-  if (cfg.ai.provider === 'rules') return false;
-  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || cfg.ai.provider === 'claude');
+  return aiProvider(cfg) !== null;
+}
+
+export async function createClient(cfg) {
+  if (aiProvider(cfg) !== 'foundry') return new Anthropic();
+  const resource = process.env.ANTHROPIC_FOUNDRY_RESOURCE || cfg.ai.foundry?.resource || undefined;
+  if (process.env.ANTHROPIC_FOUNDRY_API_KEY) return new AnthropicFoundry({ resource, apiKey: process.env.ANTHROPIC_FOUNDRY_API_KEY });
+  // No key: authenticate with the App Service managed identity (Entra ID), so there is no secret at all.
+  const { DefaultAzureCredential, getBearerTokenProvider } = await import('@azure/identity');
+  const azureADTokenProvider = getBearerTokenProvider(new DefaultAzureCredential(), 'https://ai.azure.com/.default');
+  return new AnthropicFoundry({ resource, azureADTokenProvider });
 }
 
 export async function generateWithClaude({ cfg, meta, events, screenshots, base, user, client }) {
@@ -34,15 +60,17 @@ export async function generateWithClaude({ cfg, meta, events, screenshots, base,
   }
   content.push({ type: 'text', text: buildUserPrompt({ meta, candidateSteps: skeleton.doc.steps, events: compactEvents(events), screenshots: shots, base }) });
 
-  const anthropic = client || new Anthropic();
+  const anthropic = client || (await createClient(cfg));
   const format = zodOutputFormat(LlmOutput);
+  // Server-side fallback (retry a declined request on a fallback model) is a Claude API feature;
+  // on Foundry a refusal goes straight to the rule-based engine instead.
+  const fallback = aiProvider(cfg) === 'foundry' ? {} : { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' };
   const stream = anthropic.beta.messages.stream({
     model: cfg.ai.model,
     max_tokens: 64000,
     thinking: { type: 'adaptive' },
     output_config: { effort: cfg.ai.effort, format: { type: format.type, schema: format.schema } },
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
+    ...fallback,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content }],
   });

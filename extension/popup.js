@@ -13,3 +13,4 @@ $('pair').onclick = async () => {
 };
 $('unpair').onclick = async () => { await chrome.runtime.sendMessage({ type: 'unpair' }); refresh(); };
 refresh();
+chrome.runtime.sendMessage({ type: 'managed' }).then((m) => { if (m?.serverUrl && !$('api').value) $('api').value = m.serverUrl; }).catch(() => {});

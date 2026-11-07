@@ -16,6 +16,12 @@ export class Store {
     this.seqCache = new Map();
   }
 
+  // Health check: proves the data volume (Azure Files in production) is mounted and writable.
+  ping() {
+    const f = path.join(this.dir, '.health');
+    fs.writeFileSync(f, String(Date.now()));
+  }
+
   #file(col, id, ext = '.json') {
     if (!/^[a-z]+_[a-f0-9]+$/.test(id)) throw Object.assign(new Error('Invalid id'), { status: 400 });
     return path.join(this.dir, col, id + ext);

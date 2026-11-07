@@ -31,12 +31,14 @@ Status legend: ✅ automated test passes · 🟡 implemented, needs a real envir
 ## Automated tests
 
 ```bash
-npm test                     # 23 unit/API tests (engines, redaction, API workflow, RBAC, conflicts, retention, Claude engine with a fake client, SharePoint adapter with a mocked Graph)
+npm test                     # 25 unit/API tests (engines, redaction, API workflow, RBAC, conflicts, retention, Claude engine with a fake client, Foundry/Claude API provider selection, SharePoint adapter with a mocked Graph incl. managed identity)
 npm run test:e2e             # builds the app, launches Chromium with the extension, runs both workflows end to end
-python3 -m unittest discover -s desktop-agent/tests   # 7 desktop-agent tests
+python3 -m unittest discover -s desktop-agent/tests   # 8 desktop-agent tests (incl. machine policy / allowed servers)
 ```
 
 `E2E_SCREENSHOTS=docs/screenshots npm run test:e2e` also saves screenshots of each screen.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs all of the above plus `az bicep build`, PSScriptAnalyzer and the PyInstaller build of the Windows agent on every push.
 
 ## Manual test scenarios for a pilot tenant
 
@@ -51,4 +53,6 @@ python3 -m unittest discover -s desktop-agent/tests   # 7 desktop-agent tests
 | M7 | Revoke the app's site permission, then publish | Clear error; draft stays approved and can be retried |
 | M8 | Contributor tries to approve | Not possible (button hidden; API returns 403) |
 | M9 | Wait past the retention period | Raw events and unused screenshots deleted; audit entry written |
-| M10 | With `ANTHROPIC_API_KEY` set, record M1 again | Higher-level step titles, purpose left for clarification, every step lists evidence |
+| M10 | With Foundry (or `ANTHROPIC_API_KEY`) configured, record M1 again | Higher-level step titles, purpose left for clarification, every step lists evidence |
+| M11 | Extension with `allowedServers` set; open a different site that sends `PDA_PAIR` | Pairing refused with "Your organisation only allows recording with …" |
+| M12 | Remove the managed identity's site permission, open Administration | SharePoint status shows the Graph 403 error; publishing is refused, draft kept |

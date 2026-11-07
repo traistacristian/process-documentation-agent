@@ -1,5 +1,6 @@
 {
   "port": 3000,
+  "publicUrl": "",
   "dataDir": "./data",
   "auth": {
     "mode": "dev",
@@ -15,7 +16,8 @@
     "provider": "auto",
     "model": "claude-opus-5-5",
     "effort": "high",
-    "maxScreenshotsToModel": 20
+    "maxScreenshotsToModel": 20,
+    "foundry": { "resource": "" }
   },
   "repository": {
     "mode": "local",
@@ -23,6 +25,7 @@
     "sharepoint": {
       "tenantId": "",
       "clientId": "",
+      "auth": "secret",
       "clientSecretEnv": "SP_CLIENT_SECRET",
       "siteUrl": "https://contoso.sharepoint.com/sites/ITOps",
       "libraryName": "Documents",

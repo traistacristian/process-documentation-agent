@@ -1,0 +1,66 @@
+name: Deploy to Azure
+
+# Runs after CI succeeds on main, or manually. Uses OpenID Connect: no Azure secret is stored in GitHub.
+# Repository variables (Settings > Secrets and variables > Actions > Variables), all ids, none secret:
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID   (federated credential for this repo, environment "production")
+#   AZURE_RESOURCE_GROUP, SHAREPOINT_SITE_URL, SHAREPOINT_LIBRARY
+#   AI_PROVIDER (foundry | anthropic | rules), FOUNDRY_RESOURCE_NAME
+#   ENTRA_API_CLIENT_ID, ENTRA_SPA_CLIENT_ID   (printed by scripts/Setup-EntraAndSharePoint.ps1)
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+concurrency: { group: deploy-production, cancel-in-progress: false }
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.workflow_run.head_sha || github.sha }}' }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Build
+        run: |
+          npm ci && npm test && npm run build
+          npm ci --omit=dev
+          zip -qr app.zip server config web/dist package.json package-lock.json node_modules -x 'config/local.json'
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy infrastructure
+        id: infra
+        run: |
+          out=$(az deployment group create -g "${{ vars.AZURE_RESOURCE_GROUP }}" -f infra/main.bicep \
+            -p sharePointSiteUrl="${{ vars.SHAREPOINT_SITE_URL }}" \
+               sharePointLibrary="${{ vars.SHAREPOINT_LIBRARY || 'Documents' }}" \
+               aiProvider="${{ vars.AI_PROVIDER || 'foundry' }}" \
+               foundryResourceName="${{ vars.FOUNDRY_RESOURCE_NAME }}" \
+               entraApiClientId="${{ vars.ENTRA_API_CLIENT_ID }}" \
+               entraSpaClientId="${{ vars.ENTRA_SPA_CLIENT_ID }}" \
+            --query properties.outputs -o json)
+          echo "webApp=$(echo "$out" | jq -r .webAppName.value)" >> "$GITHUB_OUTPUT"
+          echo "url=$(echo "$out" | jq -r .url.value)" >> "$GITHUB_OUTPUT"
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ steps.infra.outputs.webApp }}
+          package: app.zip
+      - name: Health check
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "${{ steps.infra.outputs.url }}/healthz"; then exit 0; fi
+            sleep 10
+          done
+          echo "App did not become healthy"; exit 1

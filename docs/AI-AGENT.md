@@ -14,7 +14,8 @@ The full system prompt is in [`server/engine/prompts.js`](../server/engine/promp
 
 ## Model call
 
-- Model `claude-opus-5-5`, adaptive thinking, effort `high`, streaming, **structured output** (JSON schema generated from the Zod document schema), server-side refusal fallback (`fallbacks: "default"`).
+- Model `claude-opus-5-5`, adaptive thinking, effort `high`, streaming, **structured output** (JSON schema generated from the Zod document schema).
+- Provider: Claude API (`ANTHROPIC_API_KEY`, with server-side refusal fallback `fallbacks: "default"`) or **Claude in Microsoft Foundry** (`ANTHROPIC_FOUNDRY_RESOURCE`, authenticated with the App Service managed identity; a refusal there goes straight to the rule-based engine).
 - Input: process metadata, existing approved document (updates), all redacted events, deterministic candidate steps, up to 20 screenshots as images.
 
 ## Server-side guardrails (applied to every model answer)

@@ -10,13 +10,25 @@ export class GraphError extends Error {
 }
 
 export class GraphClient {
-  constructor({ tenantId, clientId, clientSecret, fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
-    Object.assign(this, { tenantId, clientId, clientSecret, fetch: fetchImpl, sleep });
+  // auth: 'secret' (client credentials of an app registration) or 'managedIdentity' (the App Service
+  // identity; no secret exists anywhere). credential is injectable for tests.
+  constructor({ tenantId, clientId, clientSecret, auth = 'secret', credential, fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+    Object.assign(this, { tenantId, clientId, clientSecret, auth, credential, fetch: fetchImpl, sleep });
     this.token = null; this.tokenExp = 0;
   }
 
   async getToken() {
     if (this.token && Date.now() < this.tokenExp - 60_000) return this.token;
+    if (this.auth === 'managedIdentity') {
+      if (!this.credential) {
+        const { ManagedIdentityCredential } = await import('@azure/identity');
+        this.credential = new ManagedIdentityCredential(this.clientId ? { clientId: this.clientId } : undefined);
+      }
+      let t;
+      try { t = await this.credential.getToken('https://graph.microsoft.com/.default'); } catch (e) { throw Object.assign(new Error(`Managed identity token request failed: ${e.message}`), { status: 502, code: 'AUTH_FAILED' }); }
+      this.token = t.token; this.tokenExp = t.expiresOnTimestamp;
+      return this.token;
+    }
     if (!this.tenantId || !this.clientId || !this.clientSecret) throw Object.assign(new Error('SharePoint is not configured: tenantId, clientId and client secret are required.'), { status: 503, code: 'NOT_CONFIGURED' });
     const res = await this.fetch(`https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/token`, {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
