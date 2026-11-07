@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- TEST FIXTURE ONLY: a small fake "admin portal" used by the end-to-end test so that real browser
+     activity can be captured by the extension. It is not part of the application. ?v=2 enables the
+     changed procedure (new Security tab, extra security option, verification page). -->
+<html><head><meta charset="utf-8"><title>Active users - Contoso Admin Portal</title>
+<style>body{font:14px Segoe UI,sans-serif;margin:0}header{background:#243a5e;color:#fff;padding:12px 20px}main{padding:20px}
+table{border-collapse:collapse}td,th{padding:6px 12px;border-bottom:1px solid #ddd}tr.u{cursor:pointer}tr.u:hover{background:#eef}
+[role=tablist] button{padding:6px 12px}.toast{position:fixed;right:20px;top:60px;background:#2b8a3e;color:#fff;padding:10px 16px;border-radius:6px}
+label{display:block;margin:10px 0}</style></head>
+<body><header>Contoso Admin Portal</header><main id="app"></main><div id="toasts"></div>
+<script>
+const v2 = new URLSearchParams(location.search).get('v') === '2';
+const app = document.getElementById('app');
+function toast(t){ const d=document.createElement('div'); d.className='toast success'; d.setAttribute('role','status'); d.textContent=t; document.getElementById('toasts').replaceChildren(d); }
+function render(){
+  const h = location.hash || '#/users';
+  if (h.startsWith('#/users')) {
+    document.title = 'Active users - Contoso Admin Portal';
+    app.innerHTML = `<h1>Active users</h1><form id="sf" aria-label="User search"><label>Search users <input id="q" name="q" type="search"></label></form>
+      <table><thead><tr><th>Display name</th><th>Username</th></tr></thead><tbody id="rows"></tbody></table>`;
+    const rows = document.getElementById('rows');
+    const show = (q) => { rows.innerHTML = [['John Doe','jdoe'],['Mary Major','mmajor']].filter(([n,u])=>!q||u.includes(q)||n.toLowerCase().includes(q)).map(([n,u])=>`<tr class="u" role="row" data-u="${u}"><td role="gridcell">${n}</td><td>${u}</td></tr>`).join(''); };
+    show('');
+    document.getElementById('sf').onsubmit = (e) => { e.preventDefault(); show(document.getElementById('q').value.trim().toLowerCase()); };
+    rows.onclick = (e) => { const tr = e.target.closest('tr'); if (tr) location.hash = '#/user/' + tr.dataset.u; };
+  } else if (h.startsWith('#/user/')) {
+    document.title = 'John Doe - Contoso Admin Portal';
+    const perms = `<label>Permission level <select id="perm" name="perm"><option>User</option><option>Helpdesk administrator</option><option>Global reader</option></select></label>`;
+    app.innerHTML = `<h1>John Doe</h1>` + (v2
+      ? `<div role="tablist"><button role="tab" id="tGen">General</button><button role="tab" id="tSec">Security</button></div><section id="panel" role="tabpanel" aria-label="General"><p>General account details.</p></section>`
+      : `<section role="region" aria-label="Permissions">${perms}</section>`) + `<button id="save">Save</button>`;
+    if (v2) {
+      document.getElementById('tSec').onclick = () => { const p = document.getElementById('panel'); p.setAttribute('aria-label','Security'); p.innerHTML = perms + `<label><input type="checkbox" id="mfa"> Require phishing-resistant MFA</label><label>Temporary password <input type="password" id="tmp"></label>`; };
+    }
+    document.getElementById('save').onclick = () => { toast('Changes saved successfully'); if (v2) { const a=document.createElement('a'); a.href='#/summary'; a.textContent='View permission summary'; app.appendChild(a);} };
+  } else if (h.startsWith('#/summary')) {
+    document.title = 'Permission summary - Contoso Admin Portal';
+    app.innerHTML = `<h1>Permission summary</h1><p>John Doe: Helpdesk administrator, phishing-resistant MFA required.</p>`;
+  }
+}
+addEventListener('hashchange', render); render();
+</script></body></html>

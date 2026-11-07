@@ -1,0 +1,493 @@
+// HTTP API of the Process Documentation Agent.
+import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { Store, newId } from './store.js';
+import { AuditLog } from './audit.js';
+import { createAuth, ROLES } from './auth.js';
+import { saveAdminSettings } from './config.js';
+import { sanitizeEvent } from './engine/redact.js';
+import { generateWithRules } from './engine/generate-rules.js';
+import { generateWithClaude, aiAvailable } from './engine/generate-llm.js';
+import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from './engine/compare.js';
+import { normalizeDoc } from './engine/schema.js';
+import { applyAnswer } from './engine/clarify.js';
+import { renderDocx, renderMarkdown } from './engine/render.js';
+import { createRepository } from './repo/index.js';
+import { applyRetention } from './retention.js';
+
+const ACTIVE = ['recording', 'paused'];
+const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
+const httpError = (status, message, code) => Object.assign(new Error(message), { status, code });
+
+export function createApp(cfg, deps = {}) {
+  const store = deps.store || new Store(cfg.dataDir);
+  const audit = deps.audit || new AuditLog(cfg.dataDir);
+  const repo = deps.repo || createRepository(cfg, deps.repoDeps);
+  const { authenticate, requireRole } = createAuth(cfg);
+  const generators = { rules: generateWithRules, claude: deps.generateWithClaude || generateWithClaude };
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '15mb' }));
+  app.use((req, res, next) => { res.set({ 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY' }); next(); });
+
+  const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+  const notify = async (event, payload) => {
+    if (!cfg.notifications?.webhookUrl) return;
+    try { await fetch(cfg.notifications.webhookUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event, ...payload }) }); } catch (e) { audit.write(null, 'webhook.failed', { event, error: e.message }); }
+  };
+  const isApprover = (u) => u.roles.includes(ROLES.APPROVER) || u.roles.includes(ROLES.ADMIN);
+  const canSeeSession = (u, s) => s.createdBy.id === u.id || isApprover(u);
+  const engineName = () => (aiAvailable(cfg) ? `claude (${cfg.ai.model})` : 'rules');
+  const publicSession = (s) => { const { captureTokenHash, ...rest } = s; return rest; };
+
+  // ---------------------------------------------------------------- public config
+  app.get('/api/config', (req, res) => {
+    res.json({
+      authMode: cfg.auth.mode,
+      devUsers: cfg.auth.mode === 'dev' ? cfg.auth.devUsers : undefined,
+      entra: cfg.auth.mode === 'entra' ? { tenantId: cfg.auth.entra.tenantId, clientId: cfg.auth.entra.spaClientId, scope: cfg.auth.entra.apiScope } : undefined,
+      repository: { mode: cfg.repository.mode, label: repo.label },
+      aiEngine: engineName(),
+      categories: cfg.categories,
+    });
+  });
+
+  // ---------------------------------------------------------------- capture clients (extension / desktop agent)
+  const captureAuth = (req, res, next) => {
+    const m = /^Bearer (.+)$/.exec(req.get('authorization') || '');
+    const sid = req.get('x-session-id');
+    const s = m && sid ? store.get('sessions', sid) : null;
+    if (!s || !s.captureTokenHash || s.captureTokenHash !== hashToken(m[1])) return res.status(401).json({ error: 'Invalid capture token' });
+    req.session = s; next();
+  };
+
+  app.post('/api/capture/pair', wrap(async (req, res) => {
+    const code = String(req.body?.code || '').replace(/\D/g, '');
+    const s = store.list('sessions').find((x) => x.pairing?.code === code && ACTIVE.includes(x.status) && x.pairing.expiresAt > Date.now());
+    if (!s) return res.status(404).json({ error: 'No active recording with this pairing code' });
+    const token = crypto.randomBytes(32).toString('base64url');
+    s.captureTokenHash = hashToken(token);
+    const client = { type: String(req.body?.client?.type || 'unknown').slice(0, 30), version: String(req.body?.client?.version || '').slice(0, 20), host: String(req.body?.client?.host || '').slice(0, 80), pairedAt: Date.now() };
+    s.clients = [...(s.clients || []).filter((c) => c.type !== client.type), client];
+    store.put('sessions', s);
+    audit.write(s.createdBy, 'capture.paired', { sessionId: s.id, client });
+    res.json({ sessionId: s.id, captureToken: token, title: s.meta.title, status: s.status, policy: cfg.capture });
+  }));
+
+  app.get('/api/capture/state', captureAuth, (req, res) => res.json({ sessionId: req.session.id, status: req.session.status, title: req.session.meta.title, policy: cfg.capture }));
+
+  function ingestEvents(s, rawEvents, source) {
+    if (!Array.isArray(rawEvents)) throw httpError(400, 'events must be an array');
+    if (!ACTIVE.includes(s.status)) return { accepted: 0, dropped: rawEvents.length, status: s.status };
+    const seen = new Set(s.seenClientIds || []);
+    const accepted = []; let dropped = 0;
+    for (const raw of rawEvents.slice(0, 500)) {
+      if (raw?.clientId && seen.has(raw.clientId)) continue; // idempotent retry from a client
+      if (s.status === 'paused' && !['note', 'mark', 'resume'].includes(raw?.type)) { dropped++; continue; }
+      const ev = sanitizeEvent({ ...raw, source: source || raw.source }, cfg.capture);
+      if (!ev) { dropped++; continue; }
+      if (ev.screenshotId && !store.screenshotPath(s.id, ev.screenshotId)) delete ev.screenshotId;
+      if (raw.clientId) seen.add(raw.clientId);
+      accepted.push(ev);
+    }
+    const stored = accepted.length ? store.appendEvents(s.id, accepted) : [];
+    s.eventCount = (s.eventCount || 0) + stored.length;
+    s.lastEventAt = Date.now();
+    const lastCtx = [...stored].reverse().find((e) => e.app || e.url || e.windowTitle);
+    if (lastCtx) s.currentApplication = { app: lastCtx.app, windowTitle: lastCtx.windowTitle, url: lastCtx.url, pageTitle: lastCtx.pageTitle, source: lastCtx.source };
+    s.seenClientIds = [...seen].slice(-5000);
+    store.put('sessions', s);
+    return { accepted: stored.length, dropped, status: s.status };
+  }
+
+  function saveShot(s, body) {
+    if (!ACTIVE.includes(s.status)) throw httpError(409, `Recording is ${s.status}`);
+    if (store.listScreenshots(s.id).length >= cfg.capture.maxScreenshotsPerSession) throw httpError(429, 'Screenshot limit for this session reached');
+    const m = /^data:(image\/(?:jpeg|png));base64,(.+)$/.exec(body?.data || '');
+    if (!m) throw httpError(400, 'Expected a data URL with a JPEG or PNG image');
+    const buf = Buffer.from(m[2], 'base64');
+    if (buf.length > 8 * 1024 * 1024) throw httpError(413, 'Screenshot too large');
+    return store.saveScreenshot(s.id, buf, m[1]);
+  }
+
+  app.post('/api/capture/events', captureAuth, wrap(async (req, res) => res.json(ingestEvents(req.session, req.body?.events, req.body?.source))));
+  app.post('/api/capture/screenshots', captureAuth, wrap(async (req, res) => res.json(saveShot(req.session, req.body))));
+
+  // ---------------------------------------------------------------- everything below requires a signed-in user
+  app.use('/api', authenticate);
+  app.get('/api/me', (req, res) => res.json(req.user));
+
+  // ---------------------------------------------------------------- repository
+  app.get('/api/repository/status', wrap(async (req, res) => res.json(await repo.status())));
+  app.get('/api/processes', wrap(async (req, res) => res.json(await repo.search(req.query.q))));
+  app.get('/api/processes/duplicates', wrap(async (req, res) => {
+    const title = String(req.query.title || '');
+    const all = await repo.list();
+    res.json(all.map((p) => ({ ...p, score: similarity({ title }, { title: p.title }) })).filter((p) => p.score >= 0.6).sort((a, b) => b.score - a.score).slice(0, 5));
+  }));
+  app.get('/api/processes/:pid', wrap(async (req, res) => {
+    const p = await repo.get(req.params.pid);
+    if (!p) return res.status(404).json({ error: 'Process not found' });
+    res.json(p);
+  }));
+  app.get('/api/processes/:pid/screenshots/:shot', wrap(async (req, res) => {
+    const s = await repo.screenshot(req.params.pid, req.params.shot);
+    if (!s) return res.status(404).end();
+    res.type(s.mime).send(s.buffer);
+  }));
+  app.get('/api/repository/processes/:pid/:file', wrap(async (req, res) => {
+    const buf = await repo.file(req.params.pid, req.params.file);
+    if (!buf) return res.status(404).end();
+    if (req.params.file.endsWith('.docx')) res.attachment(`${req.params.pid}.docx`);
+    res.type(path.extname(req.params.file)).send(buf);
+  }));
+
+  // ---------------------------------------------------------------- recording sessions
+  app.post('/api/sessions', requireRole(ROLES.CONTRIBUTOR), wrap(async (req, res) => {
+    const b = req.body || {};
+    const mode = b.mode === 'update' ? 'update' : 'new';
+    let baseRef = null; let meta;
+    if (mode === 'update') {
+      const p = await repo.get(String(b.processId || ''));
+      if (!p) throw httpError(404, 'Process not found in the repository');
+      baseRef = { processId: p.doc.info.processId, version: p.doc.info.version, etag: p.etag, doc: p.doc };
+      meta = { title: p.doc.info.title, description: '', department: p.doc.info.department, owner: p.doc.info.owner, category: p.doc.info.category };
+    } else {
+      const title = String(b.title || '').trim();
+      if (!title) throw httpError(400, 'Process title is required');
+      meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : '') };
+    }
+    const s = {
+      id: newId('ses'), mode, meta, baseRef, status: 'recording', createdBy: { id: req.user.id, name: req.user.name },
+      startedAt: Date.now(), stoppedAt: null, pausedMs: 0, pausedAt: null, eventCount: 0, clients: [],
+      pairing: { code: String(crypto.randomInt(100000, 999999)), expiresAt: Date.now() + 8 * 3600_000 },
+      consent: { acceptedAt: b.consent ? Date.now() : null, text: 'Recording captures application names, page titles, the names of clicked elements and screenshots while recording is active. Passwords and sensitive fields are never captured.' },
+    };
+    if (!b.consent) throw httpError(400, 'Explicit consent is required before recording can start');
+    store.put('sessions', s);
+    store.appendEvents(s.id, [{ type: 'start', ts: Date.now(), source: 'user' }]);
+    audit.write(req.user, 'session.started', { sessionId: s.id, mode, title: meta.title, processId: baseRef?.processId });
+    res.status(201).json(publicSession(s));
+  }));
+
+  app.get('/api/sessions', wrap(async (req, res) => {
+    const all = store.list('sessions').filter((s) => canSeeSession(req.user, s)).sort((a, b) => b.startedAt - a.startedAt);
+    res.json(all.map((s) => { const { baseRef, ...r } = publicSession(s); return { ...r, baseRef: baseRef ? { processId: baseRef.processId, version: baseRef.version } : null }; }));
+  }));
+
+  const loadSession = (req) => {
+    const s = store.get('sessions', req.params.id);
+    if (!s || !canSeeSession(req.user, s)) throw httpError(404, 'Recording not found');
+    return s;
+  };
+
+  app.get('/api/sessions/:id', wrap(async (req, res) => {
+    const s = loadSession(req);
+    const events = store.readEvents(s.id);
+    res.json({ ...publicSession(s), recentEvents: events.slice(-30).reverse(), screenshotCount: store.listScreenshots(s.id).length });
+  }));
+
+  app.post('/api/sessions/:id/control', wrap(async (req, res) => {
+    const s = loadSession(req);
+    const action = req.body?.action;
+    const now = Date.now();
+    if (action === 'pause' && s.status === 'recording') { s.status = 'paused'; s.pausedAt = now; }
+    else if (action === 'resume' && s.status === 'paused') { s.status = 'recording'; s.pausedMs += now - s.pausedAt; s.pausedAt = null; }
+    else if (action === 'stop' && ACTIVE.includes(s.status)) { if (s.pausedAt) s.pausedMs += now - s.pausedAt; s.status = 'stopped'; s.stoppedAt = now; s.pausedAt = null; s.captureTokenHash = null; }
+    else if (action === 'resume' && s.status === 'stopped' && !s.draftId) { s.status = 'recording'; s.stoppedAt = null; } // continue an interrupted / stopped recording
+    else if (action === 'discard' && !s.draftId) { s.status = 'discarded'; s.captureTokenHash = null; store.purgeRawCapture(s.id); }
+    else throw httpError(409, `Cannot ${action} a recording that is ${s.status}`);
+    store.put('sessions', s);
+    if (['pause', 'resume', 'stop'].includes(action)) store.appendEvents(s.id, [{ type: action, ts: now, source: 'user' }]);
+    audit.write(req.user, `session.${action}`, { sessionId: s.id });
+    res.json(publicSession(s));
+  }));
+
+  app.post('/api/sessions/:id/notes', wrap(async (req, res) => {
+    const s = loadSession(req);
+    const kind = req.body?.kind === 'mark' ? 'mark' : 'note';
+    const ev = { type: kind, ts: Date.now(), text: String(req.body?.text || '').slice(0, 1000), screenshotId: req.body?.screenshotId };
+    res.json(ingestEvents(s, [ev], 'user'));
+  }));
+  app.post('/api/sessions/:id/events', wrap(async (req, res) => res.json(ingestEvents(loadSession(req), req.body?.events, 'web'))));
+  app.post('/api/sessions/:id/screenshots', wrap(async (req, res) => res.json(saveShot(loadSession(req), req.body))));
+  app.get('/api/sessions/:id/screenshots/:shot', wrap(async (req, res) => {
+    const s = loadSession(req);
+    const p = store.screenshotPath(s.id, req.params.shot);
+    if (!p) return res.status(404).end();
+    res.sendFile(p);
+  }));
+
+  // Starts documentation generation. Runs in the background; the draft shows status "generating".
+  app.post('/api/sessions/:id/generate', wrap(async (req, res) => {
+    const s = loadSession(req);
+    if (ACTIVE.includes(s.status)) throw httpError(409, 'Stop the recording before generating documentation');
+    if (s.draftId) { const d = store.get('drafts', s.draftId); if (d && d.status !== 'failed') return res.json(d); }
+    const events = store.readEvents(s.id);
+    if (!events.some((e) => !['start', 'stop', 'pause', 'resume'].includes(e.type))) throw httpError(422, 'Nothing was captured during this recording. Check that the browser extension or desktop agent was connected.');
+    const draft = {
+      id: newId('drf'), sessionId: s.id, mode: s.mode, status: 'generating', engine: null, createdBy: s.createdBy, createdAt: Date.now(), updatedAt: Date.now(),
+      baseRef: s.baseRef ? { processId: s.baseRef.processId, version: s.baseRef.version, etag: s.baseRef.etag } : null,
+      baseDoc: s.baseRef?.doc || null, doc: null, clarifications: [], suggestions: [], comparison: null, decisions: {}, history: [],
+    };
+    store.put('drafts', draft);
+    s.draftId = draft.id; s.status = 'generated'; store.put('sessions', s);
+    res.status(202).json(draft);
+    runGeneration(draft.id, s, events, req.user, req.body?.engine).catch(() => {});
+  }));
+
+  async function runGeneration(draftId, s, events, user, requested) {
+    const draft = store.get('drafts', draftId);
+    const shots = store.listScreenshots(s.id).map((id) => ({ id, path: store.screenshotPath(s.id, id), mime: store.screenshotPath(s.id, id).endsWith('.png') ? 'image/png' : 'image/jpeg' }));
+    const input = { cfg, meta: s.meta, events, screenshots: shots, screenshotsAvailable: new Set(shots.map((x) => x.id)), base: s.baseRef?.doc || null, user };
+    let result;
+    try {
+      const useAi = requested !== 'rules' && aiAvailable(cfg);
+      try {
+        result = useAi ? await generators.claude(input) : generators.rules(input);
+      } catch (e) {
+        if (!useAi) throw e;
+        audit.write(user, 'draft.ai_failed', { draftId, error: e.message });
+        result = generators.rules(input);
+        result.suggestions = [`The AI engine was unavailable (${e.message}); this draft was produced by the rule-based engine.`, ...result.suggestions];
+      }
+      const doc = result.doc;
+      if (s.mode === 'new') {
+        doc.info.processId = `PRC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+        doc.info.version = '0.1'; doc.info.createdAt = new Date().toISOString();
+      } else {
+        doc.info.processId = s.baseRef.processId;
+        doc.info.createdAt = s.baseRef.doc.info.createdAt;
+        doc.changeHistory = s.baseRef.doc.changeHistory;
+        draft.comparison = compareDocs(s.baseRef.doc, doc);
+      }
+      Object.assign(draft, { doc, clarifications: result.clarifications, suggestions: result.suggestions, engine: result.engine, status: 'draft', updatedAt: Date.now() });
+      store.put('drafts', draft);
+      audit.write(user, 'draft.generated', { draftId, engine: result.engine, steps: doc.steps.length, clarifications: result.clarifications.length });
+    } catch (e) {
+      Object.assign(draft, { status: 'failed', error: e.message, updatedAt: Date.now() });
+      store.put('drafts', draft);
+      audit.write(user, 'draft.failed', { draftId, error: e.message });
+    }
+  }
+
+  // ---------------------------------------------------------------- drafts / review / approval / publishing
+  const loadDraft = (req) => {
+    const d = store.get('drafts', req.params.id);
+    if (!d || !(d.createdBy.id === req.user.id || isApprover(req.user))) throw httpError(404, 'Draft not found');
+    return d;
+  };
+  const draftView = (d) => {
+    const view = { ...d, pending: d.comparison ? pendingDecisions(d.comparison, d.decisions) : [] };
+    if (d.doc && d.baseDoc && d.comparison) view.mergedDoc = mergeWithDecisions(d.baseDoc, d.doc, d.comparison, d.decisions);
+    view.blockers = approvalBlockers(d);
+    return view;
+  };
+  function approvalBlockers(d) {
+    const b = [];
+    if (!d.doc) return ['Documentation has not been generated yet.'];
+    const open = d.clarifications.filter((c) => c.status === 'open').length;
+    if (open) b.push(`${open} clarification request(s) are still open. Answer them or mark them as not applicable.`);
+    if (!d.doc.info.title) b.push('The process title is missing.');
+    if (!d.doc.steps.length) b.push('The document has no steps.');
+    const unsupported = d.doc.steps.filter((s) => s.warnings.some((w) => w.startsWith('Not supported by captured evidence'))).length;
+    if (unsupported) b.push(`${unsupported} step(s) are not supported by captured evidence. Confirm them (remove the warning) or delete them.`);
+    if (d.comparison) { const p = pendingDecisions(d.comparison, d.decisions).length; if (p) b.push(`${p} change(s) still need an accept or reject decision.`); }
+    return b;
+  }
+
+  app.get('/api/drafts', wrap(async (req, res) => {
+    const all = store.list('drafts').filter((d) => d.createdBy.id === req.user.id || isApprover(req.user)).sort((a, b) => b.updatedAt - a.updatedAt);
+    res.json(all.map((d) => ({ id: d.id, mode: d.mode, status: d.status, title: d.doc?.info.title || store.get('sessions', d.sessionId)?.meta.title, processId: d.doc?.info.processId || d.baseRef?.processId, createdBy: d.createdBy, updatedAt: d.updatedAt, engine: d.engine, openClarifications: d.clarifications.filter((c) => c.status === 'open').length })));
+  }));
+  app.get('/api/drafts/:id', wrap(async (req, res) => res.json(draftView(loadDraft(req)))));
+
+  app.put('/api/drafts/:id', wrap(async (req, res) => {
+    const d = loadDraft(req);
+    if (!['draft', 'rejected'].includes(d.status)) throw httpError(409, `A draft that is ${d.status} cannot be edited`);
+    const b = req.body || {};
+    if (b.baseUpdatedAt && b.baseUpdatedAt !== d.updatedAt) throw httpError(409, 'This draft was changed by someone else. Reload it before saving.', 'CONFLICT');
+    if (b.doc) {
+      const doc = normalizeDoc(b.doc);
+      doc.info.processId = d.doc.info.processId; doc.info.version = d.doc.info.version; doc.info.createdAt = d.doc.info.createdAt; doc.changeHistory = d.doc.changeHistory;
+      d.doc = doc;
+      if (d.baseDoc) d.comparison = compareDocs(d.baseDoc, d.doc);
+    }
+    if (Array.isArray(b.clarifications)) {
+      for (const upd of b.clarifications) {
+        const c = d.clarifications.find((x) => x.id === upd.id);
+        if (!c || c.status !== 'open') continue;
+        if (upd.status === 'answered' && upd.answer?.trim()) { c.answer = upd.answer.trim(); c.status = 'answered'; applyAnswer(d.doc, c, c.answer); }
+        if (upd.status === 'dismissed') { c.status = 'dismissed'; c.answer = upd.answer || ''; }
+      }
+      if (d.baseDoc) d.comparison = compareDocs(d.baseDoc, d.doc);
+    }
+    if (b.decisions && typeof b.decisions === 'object') for (const [k, v] of Object.entries(b.decisions)) if (['accept', 'reject', null].includes(v)) { if (v) d.decisions[k] = v; else delete d.decisions[k]; }
+    if (d.status === 'rejected') d.status = 'draft';
+    d.updatedAt = Date.now();
+    d.history.push({ ts: Date.now(), user: req.user.name, action: 'saved' });
+    store.put('drafts', d);
+    audit.write(req.user, 'draft.saved', { draftId: d.id });
+    res.json(draftView(d));
+  }));
+
+  app.post('/api/drafts/:id/approve', requireRole(ROLES.APPROVER), wrap(async (req, res) => {
+    const d = loadDraft(req);
+    if (d.status !== 'draft') throw httpError(409, `Only drafts can be approved (current status: ${d.status})`);
+    const blockers = approvalBlockers(d);
+    if (blockers.length) throw httpError(422, blockers.join(' '), 'NOT_READY');
+    if (cfg.auth.requireSeparateApprover && d.createdBy.id === req.user.id) throw httpError(403, 'The author of a recording cannot approve it (separation of duties is enabled).');
+    const final = d.baseDoc ? mergeWithDecisions(d.baseDoc, d.doc, d.comparison, d.decisions) : structuredClone(d.doc);
+    const [maj, min] = String(d.baseDoc?.info.version || '0.0').split('.').map(Number);
+    final.info.version = !d.baseDoc ? '1.0' : req.body?.major ? `${maj + 1}.0` : `${maj}.${min + 1}`;
+    final.info.approver = req.user.name; final.info.status = 'Approved'; final.info.updatedAt = new Date().toISOString();
+    const summary = String(req.body?.summary || '').trim() || (d.comparison ? summarizeChanges(d.comparison, d.decisions) : 'Initial version created from a recorded execution.');
+    final.changeHistory = [...(final.changeHistory || []), { version: final.info.version, date: final.info.updatedAt, author: d.createdBy.name, approver: req.user.name, summary }];
+    d.approvedDoc = final; d.status = 'approved'; d.approvedBy = { id: req.user.id, name: req.user.name, at: Date.now() }; d.updatedAt = Date.now();
+    d.history.push({ ts: Date.now(), user: req.user.name, action: 'approved' });
+    store.put('drafts', d);
+    audit.write(req.user, 'draft.approved', { draftId: d.id, processId: final.info.processId, version: final.info.version });
+    res.json(draftView(d));
+  }));
+
+  app.post('/api/drafts/:id/reject', requireRole(ROLES.APPROVER), wrap(async (req, res) => {
+    const d = loadDraft(req);
+    if (!['draft', 'approved'].includes(d.status)) throw httpError(409, `A draft that is ${d.status} cannot be rejected`);
+    d.status = 'rejected'; d.rejection = { by: req.user.name, at: Date.now(), reason: String(req.body?.reason || '').slice(0, 2000) }; d.approvedDoc = null; d.updatedAt = Date.now();
+    d.history.push({ ts: Date.now(), user: req.user.name, action: 'rejected', reason: d.rejection.reason });
+    store.put('drafts', d);
+    audit.write(req.user, 'draft.rejected', { draftId: d.id, reason: d.rejection.reason });
+    res.json(draftView(d));
+  }));
+
+  const shotResolver = (d) => (id) => store.screenshotPath(d.sessionId, id) || null;
+  async function baseShotsToTemp(d, doc) {
+    // Screenshots kept from the previous version live in the repository, not in this session.
+    const out = []; const tmp = path.join(cfg.dataDir, 'tmp', d.id); fs.mkdirSync(tmp, { recursive: true });
+    for (const s of doc.steps) for (const id of s.screenshotIds) {
+      if (store.screenshotPath(d.sessionId, id)) continue;
+      const got = d.baseRef ? await repo.screenshot(d.baseRef.processId, id) : null;
+      if (got) { const p = path.join(tmp, `${id}.jpg`); fs.writeFileSync(p, got.buffer); out.push({ id, path: p }); }
+    }
+    return out;
+  }
+
+  app.post('/api/drafts/:id/publish', requireRole(ROLES.APPROVER), wrap(async (req, res) => {
+    const d = loadDraft(req);
+    if (d.status !== 'approved' || !d.approvedDoc) throw httpError(409, 'Only approved documentation can be published');
+    const doc = structuredClone(d.approvedDoc); doc.info.status = 'Published';
+    const baseShots = await baseShotsToTemp(d, doc);
+    const resolve = (id) => shotResolver(d)(id) || baseShots.find((x) => x.id === id)?.path || null;
+    const used = [...new Set(doc.steps.flatMap((s) => s.screenshotIds))];
+    const screenshots = used.map((id) => ({ id, path: resolve(id) })).filter((x) => x.path);
+    doc.steps.forEach((s) => { s.screenshotIds = s.screenshotIds.filter((id) => resolve(id)); });
+    let result;
+    try {
+      result = await repo.publish({ doc, docx: await renderDocx(doc, resolve), markdown: renderMarkdown(doc), screenshots, expectedEtag: d.baseRef ? d.baseRef.etag : null, publishedBy: req.user, owners: [] });
+    } catch (e) {
+      d.lastPublishError = { at: Date.now(), message: e.message, code: e.code || null };
+      store.put('drafts', d);
+      audit.write(req.user, 'draft.publish_failed', { draftId: d.id, error: e.message, code: e.code });
+      throw httpError(e.status && e.status < 600 ? (e.status === 412 ? 409 : e.status >= 500 ? 502 : e.status) : 502, `Publishing failed: ${e.message}`, e.code);
+    } finally { fs.rmSync(path.join(cfg.dataDir, 'tmp', d.id), { recursive: true, force: true }); }
+    d.status = 'published'; d.published = { ...result, at: Date.now(), by: req.user.name }; d.publishedDoc = doc; d.updatedAt = Date.now(); delete d.lastPublishError;
+    d.history.push({ ts: Date.now(), user: req.user.name, action: 'published', version: result.version });
+    store.put('drafts', d);
+    if (cfg.retention.purgeRawAfterPublish) store.purgeRawCapture(d.sessionId, new Set(used));
+    audit.write(req.user, 'draft.published', { draftId: d.id, processId: result.processId, version: result.version, webUrl: result.webUrl });
+    notify('process.published', { processId: result.processId, version: result.version, title: doc.info.title, webUrl: result.webUrl });
+    res.json(draftView(d));
+  }));
+
+  app.get('/api/drafts/:id/preview.docx', wrap(async (req, res) => {
+    const d = loadDraft(req);
+    const doc = d.publishedDoc || d.approvedDoc || (d.baseDoc ? mergeWithDecisions(d.baseDoc, d.doc, d.comparison, d.decisions) : d.doc);
+    const baseShots = await baseShotsToTemp(d, doc);
+    try {
+      const buf = await renderDocx(doc, (id) => shotResolver(d)(id) || baseShots.find((x) => x.id === id)?.path);
+      res.attachment(`${doc.info.processId} - ${doc.info.title.replace(/[^\w .-]/g, '')} (preview).docx`).type('docx').send(buf);
+    } finally { fs.rmSync(path.join(cfg.dataDir, 'tmp', d.id), { recursive: true, force: true }); }
+  }));
+
+  app.get('/api/drafts/:id/screenshots/:shot', wrap(async (req, res) => {
+    const d = loadDraft(req);
+    const p = store.screenshotPath(d.sessionId, req.params.shot);
+    if (p) return res.sendFile(p);
+    const got = d.baseRef ? await repo.screenshot(d.baseRef.processId, req.params.shot) : null;
+    if (!got) return res.status(404).end();
+    res.type(got.mime).send(got.buffer);
+  }));
+
+  // ---------------------------------------------------------------- dashboard
+  app.get('/api/dashboard', wrap(async (req, res) => {
+    let processes = []; let repoError = null;
+    try { processes = await repo.list(); } catch (e) { repoError = e.message; }
+    const since = Date.now() - 30 * 86400_000;
+    const drafts = store.list('drafts').filter((d) => d.createdBy.id === req.user.id || isApprover(req.user));
+    const sessions = store.list('sessions').filter((s) => canSeeSession(req.user, s)).sort((a, b) => b.startedAt - a.startedAt);
+    res.json({
+      repository: { label: repo.label, mode: cfg.repository.mode, error: repoError },
+      aiEngine: engineName(),
+      totals: {
+        processes: processes.length,
+        createdRecently: processes.filter((p) => Date.parse(p.createdAt) > since).length,
+        updatedRecently: processes.filter((p) => Date.parse(p.updatedAt) > since && p.version !== '1.0').length,
+        draftsAwaiting: drafts.filter((d) => ['draft', 'approved'].includes(d.status)).length,
+        recordings: sessions.length,
+      },
+      recentlyCreated: processes.filter((p) => p.version === '1.0').slice(0, 5),
+      recentlyUpdated: processes.filter((p) => p.version !== '1.0').slice(0, 5),
+      drafts: drafts.filter((d) => ['draft', 'approved', 'rejected', 'generating', 'failed'].includes(d.status)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8)
+        .map((d) => ({ id: d.id, status: d.status, mode: d.mode, title: d.doc?.info.title || store.get('sessions', d.sessionId)?.meta.title, updatedAt: d.updatedAt, createdBy: d.createdBy })),
+      recordings: sessions.slice(0, 10).map((s) => ({ id: s.id, title: s.meta.title, mode: s.mode, status: s.status, startedAt: s.startedAt, stoppedAt: s.stoppedAt, eventCount: s.eventCount, draftId: s.draftId, createdBy: s.createdBy })),
+    });
+  }));
+
+  // ---------------------------------------------------------------- administration
+  app.get('/api/admin/settings', requireRole(ROLES.ADMIN), (req, res) => res.json({ categories: cfg.categories, capture: cfg.capture, retention: cfg.retention, notifications: cfg.notifications, repository: { mode: cfg.repository.mode, label: repo.label }, ai: { engine: engineName() }, auth: { mode: cfg.auth.mode, requireSeparateApprover: cfg.auth.requireSeparateApprover } }));
+  app.put('/api/admin/settings', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
+    const b = req.body || {};
+    if (b.categories && (!Array.isArray(b.categories) || b.categories.some((c) => typeof c !== 'string' || !c.trim()))) throw httpError(400, 'Categories must be a list of names');
+    saveAdminSettings(cfg, { categories: b.categories?.map((c) => c.trim()), capture: b.capture, retention: b.retention, notifications: b.notifications });
+    audit.write(req.user, 'admin.settings_changed', { keys: Object.keys(b) });
+    res.json({ ok: true });
+  }));
+  app.post('/api/admin/repository/provision', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
+    if (!repo.ensureSchema) return res.json({ ok: true, message: 'Local repository needs no provisioning.' });
+    const r = await repo.ensureSchema(cfg.categories);
+    audit.write(req.user, 'admin.repository_provisioned', r);
+    res.json({ ok: true, ...r });
+  }));
+  app.get('/api/admin/audit', requireRole(ROLES.ADMIN), (req, res) => res.json(audit.read({ limit: Number(req.query.limit) || 200 })));
+  app.post('/api/admin/retention/run', requireRole(ROLES.ADMIN), (req, res) => res.json(applyRetention({ cfg, store, audit })));
+
+  // ---------------------------------------------------------------- web app + errors
+  const dist = path.join(cfg._root, 'web/dist');
+  if (fs.existsSync(dist)) {
+    app.use(express.static(dist));
+    app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
+  }
+  app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
+  app.use((err, req, res, _next) => {
+    const status = err.status || (err.name === 'ZodError' ? 400 : 500);
+    if (status >= 500) console.error(err);
+    res.status(status).json({ error: status >= 500 && !err.expose && !err.message?.startsWith('Publishing failed') ? 'Internal error' : err.message, code: err.code });
+  });
+  app.locals = { ...app.locals, store, audit, repo };
+  return app;
+}
+
+function summarizeChanges(cmp, decisions) {
+  const acc = (c) => decisions[c.id] === 'accept';
+  const parts = [];
+  const n = (kind) => cmp.changes.filter((c) => c.kind === kind && c.role !== 'destination' && acc(c)).length;
+  if (n('added')) parts.push(`${n('added')} step(s) added`);
+  if (n('modified')) parts.push(`${n('modified')} step(s) modified`);
+  if (n('removed')) parts.push(`${n('removed')} step(s) removed`);
+  if (n('moved')) parts.push(`${n('moved')} step(s) re-ordered`);
+  const sec = cmp.sectionChanges.filter(acc).length;
+  if (sec) parts.push(`${sec} section change(s)`);
+  return parts.length ? `Updated from a new recorded execution: ${parts.join(', ')}.` : 'Re-validated against a new recorded execution; no step changes accepted.';
+}

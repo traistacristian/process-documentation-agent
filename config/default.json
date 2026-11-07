@@ -1,0 +1,58 @@
+{
+  "port": 3000,
+  "dataDir": "./data",
+  "auth": {
+    "mode": "dev",
+    "devUsers": [
+      { "id": "alex", "name": "Alex Morgan", "email": "alex@contoso.example", "roles": ["Contributor"] },
+      { "id": "sam", "name": "Sam Rivera", "email": "sam@contoso.example", "roles": ["Contributor", "Approver"] },
+      { "id": "admin", "name": "IT Admin", "email": "admin@contoso.example", "roles": ["Contributor", "Approver", "Admin"] }
+    ],
+    "entra": { "tenantId": "", "apiClientId": "", "spaClientId": "", "apiScope": "" },
+    "requireSeparateApprover": false
+  },
+  "ai": {
+    "provider": "auto",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "maxScreenshotsToModel": 20
+  },
+  "repository": {
+    "mode": "local",
+    "local": { "path": "./data/repository" },
+    "sharepoint": {
+      "tenantId": "",
+      "clientId": "",
+      "clientSecretEnv": "SP_CLIENT_SECRET",
+      "siteUrl": "https://contoso.sharepoint.com/sites/ITOps",
+      "libraryName": "Documents",
+      "rootFolder": "IT Process Documentation",
+      "applyMetadata": true,
+      "assignOwnerPermissions": false
+    }
+  },
+  "categories": [
+    "Microsoft 365",
+    "Identity & Access Management",
+    "Service Desk",
+    "Infrastructure",
+    "Network",
+    "Workplace Management",
+    "Other IT Operations"
+  ],
+  "capture": {
+    "captureFreeTextValues": false,
+    "screenshotOnClick": true,
+    "maxScreenshotsPerSession": 300,
+    "excludedApps": ["keepass", "1password", "bitwarden", "lastpass", "credential manager", "outlook", "teams"],
+    "excludedUrlPatterns": ["*bank*", "*.lastpass.com", "*.1password.com", "vault.bitwarden.com", "mail.google.com", "outlook.office.com/mail*"],
+    "sensitiveFieldPatterns": ["password", "passwd", "secret", "token", "pin", "otp", "mfa", "code", "iban", "card", "cvv", "ssn", "api key", "apikey", "private key"],
+    "maskEmails": true
+  },
+  "retention": {
+    "rawCaptureDays": 14,
+    "purgeRawAfterPublish": true,
+    "abandonedSessionHours": 72
+  },
+  "notifications": { "webhookUrl": "" }
+}

@@ -1,0 +1,6 @@
+node_modules/
+web/dist/
+data/
+config/local.json
+__pycache__/
+*.pyc
