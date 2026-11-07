@@ -175,3 +175,19 @@ test('drafts and recordings can be deleted one by one by their owner or an Admin
   const log = (await call('GET', '/api/admin/audit', null, 'admin')).body.map((e) => e.action);
   assert.ok(log.includes('session.deleted') && log.includes('draft.deleted'));
 });
+
+test('the author describes each step during recording; the text lands in the document and can be changed', async () => {
+  const { s } = await recordAndGenerate();
+  const steps = (await call('GET', `/api/sessions/${s.id}/steps`, null, 'alex')).body;
+  assert.equal(steps.length, 2);
+  assert.equal((await call('PUT', `/api/sessions/${s.id}/step-descriptions`, { seq: steps[0].firstSeq, text: 'Find the user' }, 'sam')).status, 403, 'only the recorder describes steps');
+  await call('PUT', `/api/sessions/${s.id}/step-descriptions`, { seq: steps[0].firstSeq, text: 'Find the user' }, 'alex');
+  await call('PUT', `/api/sessions/${s.id}/step-descriptions`, { seq: steps[0].firstSeq, text: 'Find the user who asked for access' }, 'alex');
+  await call('PUT', `/api/sessions/${s.id}/step-descriptions`, { seq: steps[1].firstSeq, text: 'Give the helpdesk role' }, 'alex');
+  const again = (await call('GET', `/api/sessions/${s.id}/steps`, null, 'alex')).body;
+  assert.deepEqual(again.map((x) => x.description), ['Find the user who asked for access', 'Give the helpdesk role']);
+  await call('POST', `/api/sessions/${s.id}/control`, { action: 'stop' }, 'alex');
+  const d = await waitDraft((await call('POST', `/api/sessions/${s.id}/generate`, {}, 'alex')).body.id);
+  assert.deepEqual(d.doc.steps.map((x) => x.description), ['Find the user who asked for access', 'Give the helpdesk role']);
+  assert.ok(d.doc.steps[0].instructions.length > 1, 'recorded instructions are kept');
+});

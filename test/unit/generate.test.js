@@ -51,3 +51,14 @@ test('screen-sharing-only recording: one step per captured screen, actions left 
   assert.ok(doc.steps.every((s) => s.instructions.length === 0), 'no invented instructions');
   assert.equal(clarifications.filter((c) => /screen sharing only/.test(c.question)).length, 3);
 });
+
+test('author descriptions become the instructions of screen-sharing-only steps', async () => {
+  const { applyStepDescriptions } = await import('../../server/engine/describe.js');
+  const ev = [{ type: 'screenshot', ts: 1, seq: 1, screenshotId: 'shot_a1' }, { type: 'screenshot', ts: 2, seq: 2, screenshotId: 'shot_b2' }];
+  const r = generateWithRules({ meta: { title: 'x' }, events: ev, screenshotsAvailable: new Set(['shot_a1', 'shot_b2']), user: {} });
+  applyStepDescriptions(r, { 2: 'Open Exchange admin center\nSelect the mailbox' });
+  assert.equal(r.doc.steps[1].title, 'Open Exchange admin center');
+  assert.deepEqual(r.doc.steps[1].instructions, ['Open Exchange admin center', 'Select the mailbox']);
+  assert.equal(r.doc.steps[0].title, 'Screen 1 (describe the action)');
+  assert.equal(r.clarifications.filter((c) => /screen sharing only/.test(c.question)).length, 1);
+});

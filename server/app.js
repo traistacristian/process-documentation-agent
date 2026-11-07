@@ -10,6 +10,7 @@ import { saveAdminSettings } from './config.js';
 import { sanitizeEvent } from './engine/redact.js';
 import { generateWithRules } from './engine/generate-rules.js';
 import { generateWithClaude, aiAvailable, aiProvider } from './engine/generate-llm.js';
+import { applyStepDescriptions, findDescription } from './engine/describe.js';
 import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from './engine/compare.js';
 import { normalizeDoc } from './engine/schema.js';
 import { applyAnswer } from './engine/clarify.js';
@@ -201,6 +202,29 @@ export function createApp(cfg, deps = {}) {
     res.json({ ...publicSession(s), recentEvents: events.slice(-30).reverse(), screenshotCount: store.listScreenshots(s.id).length });
   }));
 
+  // Live list of the steps recognised so far, with the author's own description of each.
+  app.get('/api/sessions/:id/steps', wrap(async (req, res) => {
+    const s = loadSession(req);
+    const shots = new Set(store.listScreenshots(s.id));
+    const { doc } = applyStepDescriptions(generateWithRules({ meta: s.meta, events: store.readEvents(s.id), screenshotsAvailable: shots, base: null, user: req.user }), s.stepDescriptions);
+    res.json(doc.steps.map((st) => ({ key: st.evidenceEventSeqs[st.evidenceEventSeqs.length - 1] ?? null, firstSeq: st.evidenceEventSeqs[0] ?? null, number: st.number, title: st.title, screenshotId: st.screenshotIds[0] || null, description: findDescription(st, s.stepDescriptions) })));
+  }));
+  app.put('/api/sessions/:id/step-descriptions', wrap(async (req, res) => {
+    const s = loadSession(req);
+    if (s.createdBy.id !== req.user.id) throw httpError(403, 'Only the person recording can describe the steps');
+    const seq = Number(req.body?.seq); const text = String(req.body?.text ?? '').slice(0, 2000);
+    if (!Number.isInteger(seq) || seq < 1) throw httpError(400, 'seq is required');
+    const cur = store.get('sessions', s.id);
+    cur.stepDescriptions = { ...(cur.stepDescriptions || {}) };
+    // One description per step: drop older entries that belong to the same step.
+    const { doc } = generateWithRules({ meta: s.meta, events: store.readEvents(s.id), screenshotsAvailable: new Set(), base: null, user: req.user });
+    const same = new Set(doc.steps.find((st) => st.evidenceEventSeqs.includes(seq))?.evidenceEventSeqs || []);
+    for (const k of Object.keys(cur.stepDescriptions)) if (Number(k) !== seq && same.has(Number(k))) delete cur.stepDescriptions[k];
+    if (text.trim()) cur.stepDescriptions[seq] = text; else delete cur.stepDescriptions[seq];
+    store.put('sessions', cur);
+    res.json({ ok: true });
+  }));
+
   app.delete('/api/sessions/:id', wrap(async (req, res) => {
     const s = loadSession(req);
     if (!canDelete(req.user, s)) throw httpError(403, 'Only the person who recorded it or an Admin can delete this recording');
@@ -274,6 +298,7 @@ export function createApp(cfg, deps = {}) {
         result = generators.rules(input);
         result.suggestions = [`The AI engine was unavailable (${e.message}); this draft was produced by the rule-based engine.`, ...result.suggestions];
       }
+      applyStepDescriptions(result, store.get('sessions', s.id)?.stepDescriptions || s.stepDescriptions);
       const doc = result.doc;
       if (s.mode === 'new') {
         doc.info.processId = `PRC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;

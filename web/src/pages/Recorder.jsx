@@ -196,6 +196,8 @@ export default function Recorder({ id }) {
         </div>
       </div>
 
+      <StepDescriptions id={id} status={s.status} />
+
       <div className="panel">
         <h2>Captured activity</h2>
         <p className="small muted">Shown exactly as stored. Sensitive values appear as [REDACTED] or [VALUE_ENTERED].</p>
@@ -203,5 +205,39 @@ export default function Recorder({ id }) {
         <p className="small muted">Started {fmtDate(s.startedAt)} by {s.createdBy.name}.</p>
       </div>
     </>
+  );
+}
+
+// The author describes each recognised step in their own words while recording. The text goes into the
+// step's description in the document (and becomes its instructions when no clicks were captured).
+function StepDescriptions({ id, status }) {
+  const [steps, setSteps] = useState(null); const [edit, setEdit] = useState({}); const [saved, setSaved] = useState({}); const [err, setErr] = useState(null);
+  usePoll(async () => { try { setSteps(await api(`/api/sessions/${id}/steps`)); } catch (e) { setErr(e.message); } }, 3000, [id]);
+  const save = async (st) => {
+    const text = edit[st.firstSeq];
+    if (text === undefined || text === st.description) return;
+    try {
+      await api(`/api/sessions/${id}/step-descriptions`, { method: 'PUT', body: { seq: st.firstSeq, text } });
+      setSaved((x) => ({ ...x, [st.firstSeq]: Date.now() }));
+      setSteps(await api(`/api/sessions/${id}/steps`));
+      setEdit((x) => { const { [st.firstSeq]: _, ...rest } = x; return rest; });
+    } catch (e) { setErr(e.message); }
+  };
+  if (!steps) return null;
+  return (
+    <div className="panel">
+      <h2>Steps so far: your description</h2>
+      <p className="small muted">After each step, describe in your own words what you did and why. You can change any description at any time, during the recording or on the review page. The text is added to that step in the document.</p>
+      {err && <div className="alert err small">{err}</div>}
+      {steps.length ? <ol className="list" data-testid="step-descriptions" style={{ paddingLeft: 0 }}>{steps.map((st) => (
+        <li key={st.firstSeq ?? st.number} style={{ display: 'block' }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}><b>{st.number}. {st.title}</b>{saved[st.firstSeq] && <span className="small muted">saved</span>}</div>
+          <textarea data-testid="step-description" rows={2} style={{ width: '100%', marginTop: 6 }} placeholder="What did you do in this step, and why?"
+            value={edit[st.firstSeq] ?? st.description}
+            onChange={(e) => setEdit((x) => ({ ...x, [st.firstSeq]: e.target.value }))}
+            onBlur={() => save(st)} disabled={st.firstSeq == null || status === 'generated'} />
+        </li>
+      ))}</ol> : <p className="empty">Steps appear here as soon as something is captured.</p>}
+    </div>
   );
 }
