@@ -3,6 +3,7 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "namePrefix": { "value": "pda" },
+    "location": { "value": "swedencentral" },
     "sharePointSiteUrl": { "value": "https://pbksupport.sharepoint.com/sites/process-documentation-agent" },
     "sharePointLibrary": { "value": "Documents" },
     "costProfile": { "value": "free" },

@@ -46,7 +46,7 @@ jobs:
         id: infra
         run: |
           out=$(az deployment group create -g "${{ vars.AZURE_RESOURCE_GROUP }}" -f infra/main.bicep \
-            -p costProfile="${{ vars.COST_PROFILE || 'free' }}" budgetAlertEmail="${{ vars.BUDGET_ALERT_EMAIL }}" \
+            -p location="${{ vars.AZURE_LOCATION || 'swedencentral' }}" costProfile="${{ vars.COST_PROFILE || 'free' }}" budgetAlertEmail="${{ vars.BUDGET_ALERT_EMAIL }}" \
                sharePointSiteUrl="${{ vars.SHAREPOINT_SITE_URL }}" \
                sharePointLibrary="${{ vars.SHAREPOINT_LIBRARY || 'Documents' }}" \
                aiProvider="${{ vars.AI_PROVIDER || 'rules' }}" \
