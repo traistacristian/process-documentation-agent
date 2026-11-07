@@ -5,6 +5,19 @@ about half a day for a first deployment. Nothing here asks you to put a password
 an email or a file: the only secret (an optional Claude API key) is typed into the setup script and
 goes straight into Key Vault.
 
+## Free mode (default)
+
+`costProfile=free` deploys only free-of-charge resources: App Service plan **F1 (Free)**, data on the
+App Service's own persistent `/home` storage (1 GB), no storage account, Key Vault, Log Analytics or
+Application Insights, and the built-in rule engine instead of Claude. Entra app registrations,
+SharePoint (your existing Microsoft 365) and GitHub Actions on a public repository are free too. If
+your tenant has no Entra ID P1, the setup script assigns roles to the groups' members one by one.
+Set `budgetAlertEmail` to get an e-mail on any spend at all.
+
+Free-tier limits: 60 CPU minutes per day, the app sleeps after about 20 minutes idle (the first
+request then takes ~20 s), 1 GB of storage, one free Linux plan per region per subscription. Fine for
+a pilot; switch to `costProfile=standard` for daily use by a team.
+
 ## What you need before you start
 
 | Item | Who usually has it |
