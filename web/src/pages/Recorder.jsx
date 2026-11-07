@@ -23,20 +23,21 @@ const describe = (e) => {
 // Screen capture through the browser's screen-sharing dialog (getDisplayMedia). Works for any
 // application on the user's screen, but only provides screenshots - not clicks or element names.
 function useScreenShare(sessionId, active) {
-  const [stream, setStream] = useState(null); const [surface, setSurface] = useState(null); const video = useRef(null); const lastSig = useRef(null);
+  const [stream, setStream] = useState(null); const [surface, setSurface] = useState(null); const video = useRef(null); const lastSig = useRef(null); const latest = useRef(null);
   const capture = async (force) => {
     if (!stream) return null;
     // While the user works in another tab or app, this tab is hidden and the browser stops painting
     // the <video>, so frames are read from the track itself (ImageCapture) whenever available.
     let src = null; let sw = 0; let sh = 0;
     const track = stream.getVideoTracks()[0];
-    if (typeof window.ImageCapture === 'function' && track?.readyState === 'live') {
+    if (latest.current) { src = latest.current; sw = src.displayWidth; sh = src.displayHeight; }
+    else if (typeof window.ImageCapture === 'function' && track?.readyState === 'live') {
       try { src = await new window.ImageCapture(track).grabFrame(); sw = src.width; sh = src.height; } catch { src = null; }
     }
     if (!src) { if (!video.current?.videoWidth) return null; src = video.current; sw = src.videoWidth; sh = src.videoHeight; }
     const w = Math.min(1600, sw); const h = Math.round(sh * (w / sw));
     const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(src, 0, 0, w, h);
-    if (src.close) src.close();
+    if (src.close && src !== latest.current) src.close();
     const tiny = document.createElement('canvas'); tiny.width = 32; tiny.height = 18; tiny.getContext('2d').drawImage(c, 0, 0, 32, 18);
     const px = tiny.getContext('2d').getImageData(0, 0, 32, 18).data; const sig = []; for (let i = 0; i < px.length; i += 4) sig.push((px[i] + px[i + 1] + px[i + 2]) / 3);
     const diff = lastSig.current ? sig.reduce((a, x, i) => a + Math.abs(x - lastSig.current[i]), 0) / sig.length : 255;
@@ -56,6 +57,21 @@ function useScreenShare(sessionId, active) {
     } catch { t = setInterval(tick, 4000); }
     return () => { worker?.terminate(); if (t) clearInterval(t); };
   }, [stream, active]);
+  // Chromium/Edge: read frames straight from the track (MediaStreamTrackProcessor). This keeps working
+  // while this tab is in the background, unlike painting the <video> element.
+  useEffect(() => {
+    if (!stream || typeof window.MediaStreamTrackProcessor !== 'function') return undefined;
+    let stop = false; let reader = null;
+    try { reader = new window.MediaStreamTrackProcessor({ track: stream.getVideoTracks()[0] }).readable.getReader(); } catch { return undefined; }
+    (async () => {
+      while (!stop) {
+        const { value, done } = await reader.read().catch(() => ({ done: true }));
+        if (done) break;
+        latest.current?.close(); latest.current = value;
+      }
+    })();
+    return () => { stop = true; reader.cancel().catch(() => {}); latest.current?.close(); latest.current = null; };
+  }, [stream]);
   useEffect(() => () => stream?.getTracks().forEach((t) => t.stop()), [stream]);
   const start = async () => {
     // Ask for the entire screen: sharing a single tab would only show that tab.
