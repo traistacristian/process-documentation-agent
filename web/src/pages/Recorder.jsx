@@ -23,11 +23,20 @@ const describe = (e) => {
 // Screen capture through the browser's screen-sharing dialog (getDisplayMedia). Works for any
 // application on the user's screen, but only provides screenshots - not clicks or element names.
 function useScreenShare(sessionId, active) {
-  const [stream, setStream] = useState(null); const video = useRef(null); const lastSig = useRef(null);
+  const [stream, setStream] = useState(null); const [surface, setSurface] = useState(null); const video = useRef(null); const lastSig = useRef(null);
   const capture = async (force) => {
-    if (!stream || !video.current?.videoWidth) return null;
-    const v = video.current; const w = Math.min(1600, v.videoWidth); const h = Math.round(v.videoHeight * (w / v.videoWidth));
-    const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(v, 0, 0, w, h);
+    if (!stream) return null;
+    // While the user works in another tab or app, this tab is hidden and the browser stops painting
+    // the <video>, so frames are read from the track itself (ImageCapture) whenever available.
+    let src = null; let sw = 0; let sh = 0;
+    const track = stream.getVideoTracks()[0];
+    if (typeof window.ImageCapture === 'function' && track?.readyState === 'live') {
+      try { src = await new window.ImageCapture(track).grabFrame(); sw = src.width; sh = src.height; } catch { src = null; }
+    }
+    if (!src) { if (!video.current?.videoWidth) return null; src = video.current; sw = src.videoWidth; sh = src.videoHeight; }
+    const w = Math.min(1600, sw); const h = Math.round(sh * (w / sw));
+    const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(src, 0, 0, w, h);
+    if (src.close) src.close();
     const tiny = document.createElement('canvas'); tiny.width = 32; tiny.height = 18; tiny.getContext('2d').drawImage(c, 0, 0, 32, 18);
     const px = tiny.getContext('2d').getImageData(0, 0, 32, 18).data; const sig = []; for (let i = 0; i < px.length; i += 4) sig.push((px[i] + px[i + 1] + px[i + 2]) / 3);
     const diff = lastSig.current ? sig.reduce((a, x, i) => a + Math.abs(x - lastSig.current[i]), 0) / sig.length : 255;
@@ -38,17 +47,26 @@ function useScreenShare(sessionId, active) {
   };
   useEffect(() => {
     if (!stream || !active) return;
-    const t = setInterval(async () => { const id = await capture(false).catch(() => null); if (id) api(`/api/sessions/${sessionId}/events`, { method: 'POST', body: { events: [{ type: 'screenshot', ts: Date.now(), screenshotId: id }] } }).catch(() => {}); }, 4000);
-    return () => clearInterval(t);
+    const tick = async () => { const id = await capture(false).catch(() => null); if (id) api(`/api/sessions/${sessionId}/events`, { method: 'POST', body: { events: [{ type: 'screenshot', ts: Date.now(), screenshotId: id }] } }).catch(() => {}); };
+    // Timers in hidden tabs are throttled to once a minute; a worker's timer is not.
+    let worker = null; let t = null;
+    try {
+      worker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 4000)'], { type: 'text/javascript' })));
+      worker.onmessage = tick;
+    } catch { t = setInterval(tick, 4000); }
+    return () => { worker?.terminate(); if (t) clearInterval(t); };
   }, [stream, active]);
   useEffect(() => () => stream?.getTracks().forEach((t) => t.stop()), [stream]);
   const start = async () => {
-    const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 2 }, audio: false });
-    s.getVideoTracks()[0].addEventListener('ended', () => setStream(null));
+    // Ask for the entire screen: sharing a single tab would only show that tab.
+    const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 2, displaySurface: 'monitor' }, audio: false, selfBrowserSurface: 'exclude', surfaceSwitching: 'include', monitorTypeSurfaces: 'include' });
+    const track = s.getVideoTracks()[0];
+    track.addEventListener('ended', () => setStream(null));
+    setSurface(track.getSettings?.().displaySurface || null);
     setStream(s); setTimeout(() => { if (video.current) { video.current.srcObject = s; video.current.play(); } }, 0);
   };
   const stop = () => { stream?.getTracks().forEach((t) => t.stop()); setStream(null); };
-  return { stream, start, stop, capture, video };
+  return { stream, start, stop, capture, video, surface };
 }
 
 export default function Recorder({ id }) {
@@ -156,6 +174,8 @@ export default function Recorder({ id }) {
           </ul>
           {active && <p className="small">Pairing code for the desktop agent or a browser on another computer: <code className="pair" data-testid="pairing-code">{s.pairing.code}</code></p>}
           {active && !clientTypes.size && !share.stream && <div className="alert warn small">No capture source is connected yet, so only your notes will be recorded. Install the browser extension or start the desktop agent with the pairing code above.</div>}
+          {share.stream && share.surface === 'browser' && <div className="alert warn small" data-testid="share-tab-warning">You are sharing a single browser tab, so other tabs and apps will not be captured. Click <b>Stop sharing</b>, then <b>Share screen</b> again and choose <b>Entire screen</b>.</div>}
+          {active && !clientTypes.has('browser-extension') && <div className="alert small">For click-by-click steps in other browser tabs, load the browser extension. Its icon shows <b>REC</b> while it records.</div>}
           <video ref={share.video} muted style={{ display: share.stream ? 'block' : 'none', width: '100%', borderRadius: 8, marginTop: 8 }} />
         </div>
       </div>
