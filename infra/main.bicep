@@ -150,7 +150,7 @@ var baseSettings = [
   { name: 'NODE_ENV', value: 'production' }
 ]
 var monitorSettings = paid ? [
-  { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights.properties.ConnectionString }
+  { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights!.properties.ConnectionString }
 ] : []
 var aiSettings = effectiveAi == 'foundry' ? [
   { name: 'ANTHROPIC_FOUNDRY_RESOURCE', value: foundryResourceName }
@@ -182,10 +182,10 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
       azureStorageAccounts: paid ? {
         pdadata: {
           type: 'AzureFiles'
-          accountName: storage.name
+          accountName: storage!.name
           shareName: shareName
           mountPath: dataMount
-          accessKey: storage.listKeys().keys[0].value
+          accessKey: storage!.listKeys().keys[0].value
         }
       } : {}
     }
@@ -231,8 +231,8 @@ resource webDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-previe
 output webAppName string = web.name
 output url string = 'https://${web.properties.defaultHostName}'
 output managedIdentityPrincipalId string = web.identity.principalId
-output keyVaultName string = paid ? vault.name : ''
-output storageAccountName string = paid ? storage.name : ''
+output keyVaultName string = paid ? vault!.name : ''
+output storageAccountName string = paid ? storage!.name : ''
 output costProfile string = costProfile
 
 // Budget alert (budgets themselves are free). Alerts on actual spend, so any charge e-mails you.
