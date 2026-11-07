@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "namePrefix": { "value": "pda" },
-    "sharePointSiteUrl": { "value": "https://REPLACE.sharepoint.com/sites/REPLACE" },
+    "sharePointSiteUrl": { "value": "https://pbksupport.sharepoint.com/sites/process-documentation-agent" },
     "sharePointLibrary": { "value": "Documents" },
     "aiProvider": { "value": "foundry" },
     "foundryResourceName": { "value": "" },
