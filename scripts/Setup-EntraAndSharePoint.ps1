@@ -133,8 +133,19 @@ foreach ($pair in @(@($ContributorGroup, 'ProcessDoc.Contributor'), @($ApproverG
   $group = Resolve-Group $pair[0]
   $role = $api.AppRoles | Where-Object Value -eq $pair[1]
   if ($assigned | Where-Object { $_.PrincipalId -eq $group.Id -and $_.AppRoleId -eq $role.Id }) { Ok "$($group.DisplayName) already has $($pair[1])"; continue }
-  New-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $apiSp.Id -PrincipalId $group.Id -ResourceId $apiSp.Id -AppRoleId $role.Id | Out-Null
-  Ok "$($group.DisplayName) -> $($pair[1])"
+  try {
+    New-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $apiSp.Id -PrincipalId $group.Id -ResourceId $apiSp.Id -AppRoleId $role.Id | Out-Null
+    Ok "$($group.DisplayName) -> $($pair[1])"
+  } catch {
+    # Assigning roles to groups needs Entra ID P1/P2. Without it, assign the current members one by one
+    # (free); re-run this script after changing group membership.
+    Write-Warning "Group assignment not possible ($($_.Exception.Message.Split([Environment]::NewLine)[0])). Assigning the group's current members individually."
+    foreach ($m in Get-MgGroupMember -GroupId $group.Id -All | Where-Object { $_.AdditionalProperties['@odata.type'] -eq '#microsoft.graph.user' }) {
+      if ($assigned | Where-Object { $_.PrincipalId -eq $m.Id -and $_.AppRoleId -eq $role.Id }) { continue }
+      New-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $apiSp.Id -PrincipalId $m.Id -ResourceId $apiSp.Id -AppRoleId $role.Id | Out-Null
+      Ok "$($m.AdditionalProperties['userPrincipalName']) -> $($pair[1])"
+    }
+  }
 }
 
 # ------------------------------------------------------------------ 4. SharePoint access for the managed identity

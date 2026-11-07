@@ -4,6 +4,7 @@ name: Deploy to Azure
 # Repository variables (Settings > Secrets and variables > Actions > Variables), all ids, none secret:
 #   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID   (federated credential for this repo, environment "production")
 #   AZURE_RESOURCE_GROUP, SHAREPOINT_SITE_URL, SHAREPOINT_LIBRARY
+#   COST_PROFILE (free | standard, default free), BUDGET_ALERT_EMAIL
 #   AI_PROVIDER (foundry | anthropic | rules), FOUNDRY_RESOURCE_NAME
 #   ENTRA_API_CLIENT_ID, ENTRA_SPA_CLIENT_ID   (printed by scripts/Setup-EntraAndSharePoint.ps1)
 on:
@@ -45,9 +46,10 @@ jobs:
         id: infra
         run: |
           out=$(az deployment group create -g "${{ vars.AZURE_RESOURCE_GROUP }}" -f infra/main.bicep \
-            -p sharePointSiteUrl="${{ vars.SHAREPOINT_SITE_URL }}" \
+            -p costProfile="${{ vars.COST_PROFILE || 'free' }}" budgetAlertEmail="${{ vars.BUDGET_ALERT_EMAIL }}" \
+               sharePointSiteUrl="${{ vars.SHAREPOINT_SITE_URL }}" \
                sharePointLibrary="${{ vars.SHAREPOINT_LIBRARY || 'Documents' }}" \
-               aiProvider="${{ vars.AI_PROVIDER || 'foundry' }}" \
+               aiProvider="${{ vars.AI_PROVIDER || 'rules' }}" \
                foundryResourceName="${{ vars.FOUNDRY_RESOURCE_NAME }}" \
                entraApiClientId="${{ vars.ENTRA_API_CLIENT_ID }}" \
                entraSpaClientId="${{ vars.ENTRA_SPA_CLIENT_ID }}" \

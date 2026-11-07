@@ -5,7 +5,9 @@
     "namePrefix": { "value": "pda" },
     "sharePointSiteUrl": { "value": "https://pbksupport.sharepoint.com/sites/process-documentation-agent" },
     "sharePointLibrary": { "value": "Documents" },
-    "aiProvider": { "value": "foundry" },
+    "costProfile": { "value": "free" },
+    "budgetAlertEmail": { "value": "" },
+    "aiProvider": { "value": "rules" },
     "foundryResourceName": { "value": "" },
     "appServiceSku": { "value": "P0v3" }
   }

@@ -56,6 +56,7 @@ $vars = [ordered]@{
   AZURE_RESOURCE_GROUP  = $ResourceGroup
   SHAREPOINT_SITE_URL   = $SharePointSiteUrl
   SHAREPOINT_LIBRARY    = $LibraryName
+  COST_PROFILE          = 'free'
   AI_PROVIDER           = $AiProvider
   FOUNDRY_RESOURCE_NAME = $FoundryResourceName
   ENTRA_API_CLIENT_ID   = $s['ENTRA_API_CLIENT_ID']
