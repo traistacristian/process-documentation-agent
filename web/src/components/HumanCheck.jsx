@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, getConfig, humanPass, setHumanPass, HUMAN_CHECK_EVENT } from '../api.js';
+import { api, getConfig, isSignedOut, humanPass, setHumanPass, HUMAN_CHECK_EVENT } from '../api.js';
 
 // Security check after sign-in: the user solves a small calculation or number puzzle before the
 // app opens. The answer is checked on the server, which then issues a pass for this browser tab.
@@ -47,7 +47,7 @@ function HumanCheck({ onPassed }) {
 }
 
 export default function HumanCheckGate({ children }) {
-  const needed = () => !!getConfig()?.humanCheck && !humanPass();
+  const needed = () => !!getConfig()?.humanCheck && !isSignedOut() && !humanPass();
   const [show, setShow] = useState(needed);
   useEffect(() => { const f = () => setShow(needed()); addEventListener(HUMAN_CHECK_EVENT, f); return () => removeEventListener(HUMAN_CHECK_EVENT, f); }, []);
   return show ? <HumanCheck onPassed={() => setShow(false)} /> : children;
