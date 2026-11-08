@@ -234,3 +234,7 @@ test('with Claude configured, finished steps get an AI description that the auth
     assert.deepEqual(d.doc.steps.map((x) => x.description), ['AI: step 1', 'Give the helpdesk role'], 'the author correction wins over the AI text');
   } finally { s2.close(); fs.rmSync(d2, { recursive: true, force: true }); }
 });
+
+test('scripts need the AI and the Contributor role', async () => {
+  assert.equal((await call('POST', '/api/processes/PRC-2026-000000/script', {}, 'alex')).status, 409);
+});

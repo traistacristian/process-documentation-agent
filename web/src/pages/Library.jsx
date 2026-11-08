@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api.js';
+import { api, getConfig } from '../api.js';
 import { fmtDate } from '../util.jsx';
 import DocPreview from '../components/DocPreview.jsx';
 
@@ -42,6 +42,51 @@ function GuideButton({ doc }) {
   );
 }
 
+// Recording to script: Claude drafts a PowerShell script for the procedure. It is never run by the
+// app; an administrator reviews it and tests it with -WhatIf first.
+function ScriptPanel({ processId, title }) {
+  const [sc, setSc] = useState(null); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null); const [copied, setCopied] = useState(false);
+  const draft = async (regenerate) => {
+    setBusy(true); setErr(null);
+    try { setSc(await api(`/api/processes/${processId}/script`, { method: 'POST', body: { regenerate } })); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const download = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([sc.script], { type: 'text/plain' }));
+    a.download = `${processId} - ${title.replace(/[^\w .-]/g, '')}.ps1`; a.click();
+  };
+  return (
+    <div className="alert" style={{ marginTop: 12 }} data-testid="script-panel">
+      <b>Automate it.</b> Claude drafts a PowerShell script that performs this procedure through Microsoft Graph. The app never runs it: review it and test it with <code>-WhatIf</code> in a test tenant first.
+      <div className="row" style={{ marginTop: 8 }}>
+        <button className="btn" onClick={() => draft(false)} disabled={busy} data-testid="script-draft">{busy ? 'Writing the script…' : sc ? 'Show script' : 'Draft a PowerShell script'}</button>
+        {sc && <button className="btn sm ghost" onClick={() => draft(true)} disabled={busy}>Write it again</button>}
+      </div>
+      {err && <div className="alert err small" style={{ marginTop: 8 }}>{err}</div>}
+      {sc && (
+        <div style={{ marginTop: 10 }} data-testid="script-result">
+          <p>{sc.summary}</p>
+          {!sc.automatable && <div className="alert warn small">This procedure cannot be automated with supported APIs.</div>}
+          {sc.warnings?.length > 0 && <div className="alert warn small"><b>Check before use:</b><ul>{sc.warnings.map((w) => <li key={w}>{w}</li>)}</ul></div>}
+          {sc.manualSteps?.length > 0 && <div className="small"><b>Stays manual:</b><ul>{sc.manualSteps.map((m) => <li key={m.stepNumber}>Step {m.stepNumber}: {m.reason}</li>)}</ul></div>}
+          {sc.permissions?.length > 0 && <div className="small"><b>Permissions:</b> {sc.permissions.join(', ')}</div>}
+          {sc.modules?.length > 0 && <div className="small"><b>Modules:</b> {sc.modules.join(', ')}</div>}
+          {sc.parameters?.length > 0 && <div className="small"><b>Parameters:</b> {sc.parameters.map((x) => `${x.name} (${x.description})`).join('; ')}</div>}
+          {sc.assumptions?.length > 0 && <div className="small"><b>Assumptions to verify:</b><ul>{sc.assumptions.map((x) => <li key={x}>{x}</li>)}</ul></div>}
+          {sc.script && <>
+            <div className="row" style={{ margin: '8px 0' }}>
+              <button className="btn sm" onClick={() => { navigator.clipboard?.writeText(sc.script); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Copied' : 'Copy'}</button>
+              <button className="btn sm" onClick={download}>Download .ps1</button>
+              <span className="small muted">Draft by {sc.model} for version {sc.version}</span>
+            </div>
+            <pre style={{ maxHeight: 420, overflow: 'auto', background: '#1B2A33', color: '#EEF3F4', padding: 12, borderRadius: 6, fontSize: 12 }}><code>{sc.script}</code></pre>
+          </>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Library({ processId }) {
   const [list, setList] = useState(null); const [p, setP] = useState(null); const [err, setErr] = useState(null); const [q, setQ] = useState(''); const [lang, setLang] = useState('');
   useEffect(() => { api(`/api/processes?q=${encodeURIComponent(q)}`).then(setList).catch((e) => setErr(e.message)); }, [q]);
@@ -53,6 +98,7 @@ export default function Library({ processId }) {
       {p.translations?.length > 0 && <div className="row small" style={{ marginTop: 8 }} data-testid="languages">Language:
         {[p.doc.info.language === 'de' && !lang ? 'de' : 'en', ...['en', 'de']].filter((x, i, a) => a.indexOf(x) === i).map((l) => <button key={l} className={`btn sm${(p.doc.info.language || 'en') === l ? ' primary' : ''}`} onClick={() => setLang(l)}>{l === 'de' ? 'Deutsch' : 'English'}</button>)}</div>}
       <GuideButton doc={p.doc} />
+      {getConfig()?.aiEngine !== 'rules' && <ScriptPanel processId={processId} title={p.doc.info.title} />}
       <DocPreview doc={p.doc} shotUrl={(id) => `/api/processes/${processId}/screenshots/${id}`} />
     </div>
   );

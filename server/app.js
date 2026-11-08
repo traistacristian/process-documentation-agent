@@ -15,6 +15,7 @@ import { describeStepWithClaude, aiDescribeEnabled } from './engine/describe-ai.
 import { protectScreenshot } from './engine/privacy.js';
 import { attachTargets } from './engine/targets.js';
 import { translateDoc, otherLanguages } from './engine/translate.js';
+import { generateScript } from './engine/script.js';
 import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from './engine/compare.js';
 import { normalizeDoc } from './engine/schema.js';
 import { applyAnswer } from './engine/clarify.js';
@@ -162,6 +163,8 @@ export function createApp(cfg, deps = {}) {
   // Viewing, describing and generating wait for the check of a screenshot to finish.
   const protectFn = deps.protectScreenshot || protectScreenshot;
   const translate = deps.translateDoc || translateDoc;
+  const draftScript = deps.generateScript || generateScript;
+  const scriptCache = new Map(); // processId@version -> script (each draft costs an AI call)
   const privacyJobs = new Map();
   const blurEnabled = () => cfg.capture.blurPersonalData !== false && aiAvailable(cfg);
   function protectShot(sessionId, shotId) {
@@ -200,6 +203,18 @@ export function createApp(cfg, deps = {}) {
     const p = (language && await repo.get(req.params.pid, { language })) || await repo.get(req.params.pid);
     if (!p) return res.status(404).json({ error: 'Process not found' });
     res.json(p);
+  }));
+  // Recording to script: a PowerShell draft of a published procedure, for an admin to review.
+  app.post('/api/processes/:pid/script', requireRole(ROLES.CONTRIBUTOR), wrap(async (req, res) => {
+    if (!aiAvailable(cfg)) throw httpError(409, 'Scripts are written by the AI, which is not configured.');
+    const p = await repo.get(req.params.pid);
+    if (!p) throw httpError(404, 'Process not found');
+    const key = `${p.doc.info.processId}@${p.doc.info.version}`;
+    if (!req.body?.regenerate && scriptCache.has(key)) return res.json(scriptCache.get(key));
+    const out = await draftScript({ cfg, doc: normalizeDoc(p.doc) }).catch((e) => { throw httpError(502, `The script could not be drafted: ${e.message}`); });
+    scriptCache.set(key, out);
+    audit.write(req.user, 'process.script_drafted', { processId: key, automatable: out.automatable, warnings: out.warnings.length });
+    res.json(out);
   }));
   app.get('/api/processes/:pid/screenshots/:shot', wrap(async (req, res) => {
     const s = await repo.screenshot(req.params.pid, req.params.shot);
