@@ -33,7 +33,7 @@ export function createInviter(cfg, { graph } = {}) {
     return id;
   };
   const explain = (e) => {
-    if (e.status === 403) return err(502, 'Microsoft Graph refused the request. The app needs the permissions User.Invite.All and GroupMember.ReadWrite.All (run scripts/Grant-InvitePermissions.ps1), and guest invitations must be allowed in Entra ID → External collaboration settings.', 'GRAPH_FORBIDDEN');
+    if (e.status === 401 || e.status === 403) return err(502, 'Microsoft Graph refused the request (missing permission). Check that the app has User.Invite.All and GroupMember.ReadWrite.All (scripts/Grant-InvitePermissions.ps1) and that guest invitations are allowed in Entra ID → External collaboration settings. After granting, the app can take up to 24 hours to receive the new permission; restarting the app sometimes helps sooner.', 'GRAPH_FORBIDDEN');
     return err(e.status && e.status < 500 ? 400 : 502, `Microsoft Graph: ${e.message}`, e.code);
   };
 
