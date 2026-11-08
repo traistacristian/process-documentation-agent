@@ -102,10 +102,21 @@ async function flush() {
   } catch { /* offline: events stay queued and are retried by the sync loop */ } finally { flushing = false; }
 }
 
-async function screenshot(tabId, windowId, rect) {
-  const now = Date.now();
-  if (now - lastShotAt < 700) return null; // Chrome limits captureVisibleTab to ~2 calls / second
-  lastShotAt = now;
+// Chrome limits captureVisibleTab to ~2 calls / second. Instead of skipping a fast second click,
+// screenshots are queued and each one waits for its turn, so every click gets its own screenshot.
+let shotChain = Promise.resolve();
+function screenshot(tabId, windowId, rect) {
+  const run = shotChain.then(async () => {
+    const wait = 700 - (Date.now() - lastShotAt);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastShotAt = Date.now();
+    return takeScreenshot(tabId, windowId, rect);
+  });
+  shotChain = run.catch(() => null);
+  return run;
+}
+
+async function takeScreenshot(tabId, windowId, rect) {
   try {
     await chrome.tabs.sendMessage(tabId, { type: 'mask', rect });
     const data = await chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 70 });

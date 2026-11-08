@@ -52,9 +52,9 @@ function useScreenShare(sessionId, active) {
     // Timers in hidden tabs are throttled to once a minute; a worker's timer is not.
     let worker = null; let t = null;
     try {
-      worker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 4000)'], { type: 'text/javascript' })));
+      worker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 2000)'], { type: 'text/javascript' })));
       worker.onmessage = tick;
-    } catch { t = setInterval(tick, 4000); }
+    } catch { t = setInterval(tick, 2000); }
     return () => { worker?.terminate(); if (t) clearInterval(t); };
   }, [stream, active]);
   // Chromium/Edge: read frames straight from the track (MediaStreamTrackProcessor). This keeps working
