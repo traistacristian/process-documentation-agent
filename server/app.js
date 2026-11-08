@@ -249,6 +249,7 @@ export function createApp(cfg, deps = {}) {
     } else {
       const title = String(b.title || '').trim();
       if (!title) throw httpError(400, 'Process title is required');
+      if (!cleanFileName(b.fileName)) throw httpError(400, 'The name in SharePoint is required');
       meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : ''), language: b.language === 'de' ? 'de' : 'en', fileName: cleanFileName(b.fileName) };
     }
     const s = {
@@ -540,7 +541,10 @@ export function createApp(cfg, deps = {}) {
     if (d.status !== 'approved' || !d.approvedDoc) throw httpError(409, 'Only approved documentation can be published');
     const doc = structuredClone(d.approvedDoc); doc.info.status = 'Published';
     // The name in SharePoint can still be chosen at this point; default: the one given at the start, else the title.
-    if (req.body?.fileName !== undefined) doc.info.fileName = cleanFileName(req.body.fileName);
+    if (req.body?.fileName !== undefined) {
+      doc.info.fileName = cleanFileName(req.body.fileName);
+      if (!doc.info.fileName) throw httpError(400, 'The name in SharePoint is required');
+    }
     doc.info.fileName = doc.info.fileName || cleanFileName(doc.info.title);
     const baseShots = await baseShotsToTemp(d, doc);
     const resolve = (id) => shotResolver(d)(id) || baseShots.find((x) => x.id === id)?.path || null;

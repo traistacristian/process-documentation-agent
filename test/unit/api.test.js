@@ -31,7 +31,7 @@ before(async () => {
 after(() => { srv.close(); fs.rmSync(dir, { recursive: true, force: true }); });
 
 async function recordAndGenerate(user = 'alex', extra = {}) {
-  const s = (await call('POST', '/api/sessions', { mode: 'new', title: 'Grant helpdesk permissions', consent: true, ...extra }, user)).body;
+  const s = (await call('POST', '/api/sessions', { mode: 'new', title: 'Grant helpdesk permissions', fileName: 'Grant helpdesk permissions', consent: true, ...extra }, user)).body;
   const pair = await call('POST', '/api/capture/pair', { code: s.pairing.code, client: { type: 'browser-extension' } }, null);
   assert.equal(pair.status, 200);
   const h = { authorization: `Bearer ${pair.body.captureToken}`, 'x-session-id': s.id };
@@ -42,9 +42,10 @@ async function recordAndGenerate(user = 'alex', extra = {}) {
   return { s, h, events };
 }
 
-test('consent is mandatory and the title is required', async () => {
+test('consent, the title and the name in SharePoint are required', async () => {
   assert.equal((await call('POST', '/api/sessions', { mode: 'new', title: 'x' })).status, 400);
   assert.equal((await call('POST', '/api/sessions', { mode: 'new', consent: true })).status, 400);
+  assert.equal((await call('POST', '/api/sessions', { mode: 'new', title: 'x', consent: true, fileName: ' / ' })).status, 400, 'the name in SharePoint is mandatory');
 });
 
 test('capture: pairing, idempotent retries, pause drops events, stop revokes the capture token', async () => {
@@ -209,7 +210,7 @@ test('with Claude configured, finished steps get an AI description that the auth
   const b2 = `http://127.0.0.1:${s2.address().port}`;
   const c = async (method, p, body, user = 'alex', headers = {}) => { const r = await fetch(b2 + p, { method, headers: { 'content-type': 'application/json', 'x-dev-user': user, ...headers }, body: body ? JSON.stringify(body) : undefined }); return r.headers.get('content-type')?.includes('json') ? r.json() : null; };
   try {
-    const s = await c('POST', '/api/sessions', { mode: 'new', title: 'Grant helpdesk permissions', consent: true });
+    const s = await c('POST', '/api/sessions', { mode: 'new', title: 'Grant helpdesk permissions', fileName: 'Helpdesk permissions', consent: true });
     const pair = await c('POST', '/api/capture/pair', { code: s.pairing.code, client: { type: 'browser-extension' } }, null);
     const h = { authorization: `Bearer ${pair.captureToken}`, 'x-session-id': s.id };
     const shot = await c('POST', '/api/capture/screenshots', { data: PNG }, null, h);

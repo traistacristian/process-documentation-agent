@@ -42,15 +42,15 @@ export default function NewProcess({ me }) {
           <select value={f.category} onChange={set('category')}><option value="">Choose…</option>{cfg.categories.map((c) => <option key={c}>{c}</option>)}</select>
         </label>
       </div>
-      <label className="f">Name in SharePoint <span className="opt">(optional – folder and Word file are named like this; you can still change it before publishing)</span>
-        <input value={f.fileName} onChange={set('fileName')} placeholder={f.title || 'e.g. Reset user password - Microsoft 365'} data-testid="file-name" maxLength={120} /></label>
+      <label className="f">Name in SharePoint <span className="opt">(required – folder and Word file are named like this, so choose a name people will search for; you can still change it before publishing)</span>
+        <input required value={f.fileName} onChange={set('fileName')} placeholder="e.g. Reset user password - Microsoft 365" data-testid="file-name" maxLength={120} /></label>
       <label className="f" style={{ maxWidth: 320 }}>Document language
         <select value={f.language} onChange={set('language')} data-testid="language"><option value="en">English</option><option value="de">Deutsch (German)</option></select>
         <span className="small muted">The AI writes the document in this language; on publishing, the other language is added as a translated copy.</span>
       </label>
       <Consent checked={consent} onChange={setConsent} />
       <div className="row" style={{ marginTop: 16 }}>
-        <button className="btn danger big" disabled={!f.title.trim() || !consent || busy} data-testid="start">● Start Recording</button>
+        <button className="btn danger big" disabled={!f.title.trim() || !f.fileName.trim() || !consent || busy} data-testid="start">● Start Recording</button>
         <a className="btn" href="#/">Cancel</a>
       </div>
     </form>
