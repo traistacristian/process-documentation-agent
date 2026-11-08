@@ -20,6 +20,16 @@ export async function loadConfig() {
 }
 
 export const getConfig = () => config;
+export const currentAccount = () => msal?.getActiveAccount() || null;
+// Signs out of the app. Entra: ends the Microsoft session for this app and returns to the start page.
+// Demo mode: shows the signed-out screen until "Sign in" is clicked.
+export async function signOut() {
+  if (config?.authMode === 'entra' && msal) return msal.logoutRedirect({ account: msal.getActiveAccount(), postLogoutRedirectUri: location.origin });
+  try { sessionStorage.setItem('pda.signedOut', '1'); } catch { /* ignore */ }
+  location.hash = '#/'; location.reload();
+}
+export const isSignedOut = () => { try { return config?.authMode !== 'entra' && sessionStorage.getItem('pda.signedOut') === '1'; } catch { return false; } };
+export const signIn = () => { try { sessionStorage.removeItem('pda.signedOut'); } catch { /* ignore */ } location.reload(); };
 // Re-reads the settings an admin can change (categories, capture policy) without signing in again.
 export async function refreshConfig() {
   try { const fresh = await (await fetch('/api/config', { cache: 'no-store' })).json(); Object.assign(config, fresh); } catch { /* keep the cached copy */ }
