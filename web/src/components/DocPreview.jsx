@@ -8,9 +8,18 @@ export default function DocPreview({ doc, shotUrl }) {
   if (!doc) return null;
   const i = doc.info;
   return (
-    <div className="preview">
+    <div className="paper preview">
       <Lightbox url={zoom} onClose={() => setZoom(null)} />
-      <h1>{i.title}</h1>
+      <div className="cover">
+        <div className="eyebrow">IT work instruction{i.category ? ` · ${i.category}` : ''}</div>
+        <h1>{i.title}</h1>
+        {doc.purpose && <p style={{ margin: '0 0 18px', color: 'rgba(255,255,255,.88)', maxWidth: 640 }}>{doc.purpose}</p>}
+        <div className="facts">
+          <div><span>Process ID</span>{i.processId || '–'}</div><div><span>Version</span>{i.version} · {i.status}</div>
+          <div><span>Owner</span>{i.owner || '–'}</div><div><span>Steps</span>{doc.steps.length}</div>
+        </div>
+      </div>
+      <div className="content">
       <h2>1. Process Information</h2>
       <table><tbody>
         {[['Process ID', i.processId], ['Version', i.version], ['Status', i.status], ['Created', fmtDate(i.createdAt)], ['Last updated', fmtDate(i.updatedAt)], ['Process owner', i.owner], ['Department', i.department], ['Category', i.category], ['Author', i.author], ['Reviewer / approver', i.approver]].map(([k, v]) => <tr key={k}><th style={{ width: 200 }}>{k}</th><td>{v || '–'}</td></tr>)}
@@ -41,6 +50,7 @@ export default function DocPreview({ doc, shotUrl }) {
       <h2>10. Related Documentation</h2>{doc.related.length ? <ul>{doc.related.map((r, k) => <li key={k}><a href={r.url} target="_blank" rel="noreferrer">{r.title}</a></li>)}</ul> : <p className="empty">None.</p>}
       <h2>11. Change History</h2>
       {doc.changeHistory.length ? <table><thead><tr><th>Version</th><th>Date</th><th>Author</th><th>Approver</th><th>Summary</th></tr></thead><tbody>{doc.changeHistory.map((c, k) => <tr key={k}><td>{c.version}</td><td>{fmtDate(c.date)}</td><td>{c.author}</td><td>{c.approver}</td><td>{c.summary}</td></tr>)}</tbody></table> : <p className="empty">Not yet approved.</p>}
+      </div>
     </div>
   );
 }

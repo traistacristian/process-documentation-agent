@@ -159,6 +159,19 @@ test('admin can change categories; non-admins cannot', async () => {
   assert.deepEqual((await call('GET', '/api/config')).body.categories, ['Microsoft 365', 'Security Operations']);
 });
 
+test('an admin can add sample processes once; they count towards the time-saved estimate', async () => {
+  assert.equal((await call('POST', '/api/admin/samples', {}, 'sam')).status, 403);
+  const before = (await call('GET', '/api/dashboard')).body.totals;
+  const r = await call('POST', '/api/admin/samples', {});
+  assert.equal(r.status, 200); assert.equal(r.body.added.length, 4);
+  assert.equal((await call('POST', '/api/admin/samples', {})).body.added.length, 0);
+  const after = (await call('GET', '/api/dashboard')).body.totals;
+  assert.equal(after.processes, before.processes + 4);
+  assert.ok(after.hoursSaved > before.hoursSaved);
+  const one = (await call('GET', `/api/processes/${r.body.added[0].processId}`)).body;
+  assert.equal(one.doc.info.category, 'Sample'); assert.ok(one.doc.steps.length >= 4);
+});
+
 test('drafts and recordings can be deleted one by one by their owner or an Admin', async () => {
   const { s } = await recordAndGenerate();
   assert.equal((await call('DELETE', `/api/sessions/${s.id}`, null, 'alex')).status, 409, 'an active recording must be stopped first');

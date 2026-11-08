@@ -41,7 +41,7 @@ export default function App() {
   return (
     <>
       <header className="topbar">
-        <a className="logo" href="#/"><span className="mark" /> Process Documentation Agent</a>
+        <a className="logo" href="#/"><span className="mark">P</span><span>Process Documentation Agent<small>Do it once. Documented for good.</small></span></a>
         <nav>
           {link('/', 'Home')}
           {link('/library', 'Process library')}
@@ -50,13 +50,13 @@ export default function App() {
         <div className="spacer" />
         {active && page !== 'record' && <a className="rec-pill" href={`#/record/${active.id}`}>{active.status === 'paused' ? '❚❚ PAUSED' : '● RECORDING'} – {active.meta.title}</a>}
         {cfg.authMode === 'dev' ? (
-          <label className="small muted" title="Prototype mode: choose which test user you are. In production users sign in with Microsoft Entra ID.">
-            Test user:&nbsp;
-            <select style={{ width: 'auto', marginTop: 0 }} value={devUser()} onChange={(e) => { setDevUser(e.target.value); location.reload(); }}>
-              {cfg.devUsers.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.roles.join(', ')})</option>)}
+          <label className="devswitch" title="Demo mode: switch between test users to see each role. In production users sign in with their Microsoft account.">
+            Viewing as
+            <select value={devUser()} onChange={(e) => { setDevUser(e.target.value); location.reload(); }}>
+              {cfg.devUsers.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.roles.at(-1)}</option>)}
             </select>
           </label>
-        ) : <span className="small">{me?.name}</span>}
+        ) : me && <span className="row small" title={me.roles.join(', ')}><span className="avatar">{(me.name || '?').split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase()}</span>{me.name}</span>}
       </header>
       <main>{view}</main>
     </>

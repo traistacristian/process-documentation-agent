@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { usePoll, fmtDate, StatusBadge } from '../util.jsx';
 
 export default function Landing({ me }) {
+  const isAdmin = me?.roles.includes('Admin');
   const [d, setD] = useState(null); const [err, setErr] = useState(null);
   usePoll(async () => { try { setD(await api('/api/dashboard')); setErr(null); } catch (e) { setErr(e.message); } }, 8000);
   const remove = async (kind, item) => {
@@ -17,13 +18,25 @@ export default function Landing({ me }) {
   return (
     <>
       <section className="hero">
-        <h1>Welcome to Process Documentation Agent</h1>
-        <p>Capture your knowledge. Document your processes. Preserve operational expertise.</p>
+        <div>
+          <div className="eyebrow">IT process documentation</div>
+          <h1>Do the task once.<br />Get the work instruction for free.</h1>
+          <p>Perform an IT task as you normally would. The agent records each step with screenshots, writes a standard work instruction, and publishes it to SharePoint after review and approval.</p>
+          <div className="cta">
+            <a className="btn big light" href="#/new" data-testid="choice-new">● Record a new process</a>
+            <a className="btn big outline" href="#/update" data-testid="choice-update">↻ Update an existing process</a>
+          </div>
+        </div>
+        <div className="hero-steps">
+          <div><b>1</b><span><strong>Record</strong> – do the task in the browser or on the desktop</span></div>
+          <div><b>2</b><span><strong>Review</strong> – the agent drafts the steps, you fill the gaps</span></div>
+          <div><b>3</b><span><strong>Approve &amp; publish</strong> – a Word document in SharePoint, in English and German</span></div>
+        </div>
       </section>
 
       {err && <div className="alert err">{err}</div>}
       {d?.repository.error && <div className="alert err">The documentation repository could not be reached: {d.repository.error}</div>}
-      {d?.repository.mode === 'local' && <div className="alert warn small">Prototype configuration: documents are published to a <b>local folder on the server</b>, not to SharePoint. An administrator can connect SharePoint in the configuration (see the deployment guide).</div>}
+      {isAdmin && d?.repository.mode === 'local' && <div className="alert warn small">Prototype configuration: documents are published to a <b>local folder on the server</b>, not to SharePoint. An administrator can connect SharePoint in the configuration (see the deployment guide).</div>}
 
       {interrupted.length > 0 && (
         <div className="alert info">
@@ -37,26 +50,17 @@ export default function Landing({ me }) {
         </div>
       )}
 
-      <div className="grid g2" style={{ marginBottom: 20 }}>
-        <a className="choice" href="#/new" data-testid="choice-new">
-          <div className="ico">＋</div>
-          <h2>Create New Process Recording</h2>
-          <p className="muted">Document a process that is not in the documentation repository yet. Perform the task as you normally would; the agent records the steps and writes the documentation for you to review.</p>
-        </a>
-        <a className="choice" href="#/update" data-testid="choice-update">
-          <div className="ico">↻</div>
-          <h2>Update Existing Process Recording</h2>
-          <p className="muted">A process has changed? Select it, perform the new procedure, and review exactly which steps were added, changed or removed before the new version is published.</p>
-        </a>
-      </div>
-
       {d && (
         <>
           <div className="grid g5" style={{ marginBottom: 16 }}>
-            {[['Documented processes', d.totals.processes], ['Created (30 days)', d.totals.createdRecently], ['Updated (30 days)', d.totals.updatedRecently], ['Drafts awaiting approval', d.totals.draftsAwaiting], ['Recordings', d.totals.recordings]].map(([l, n]) => (
+            <div className="panel stat hl" title="Estimate: writing a work instruction by hand takes about 30 minutes plus 5 minutes per step; with the agent about 10 minutes of review.">
+              <div className="n">{d.totals.hoursSaved ?? 0} h</div><div className="l">Time saved (estimate)</div><div className="hint">vs. writing the documents by hand</div>
+            </div>
+            {[['Documented processes', d.totals.processes], ['Created (30 days)', d.totals.createdRecently], ['Updated (30 days)', d.totals.updatedRecently], ['Awaiting approval', d.totals.draftsAwaiting]].map(([l, n]) => (
               <div className="panel stat" key={l}><div className="n">{n}</div><div className="l">{l}</div></div>
             ))}
           </div>
+          {isAdmin && d.totals.processes === 0 && <div className="alert info small">Showing the app to someone? Add a few realistic sample processes under <a href="#/admin">Administration → Demo content</a>.</div>}
           <div className="grid g2">
             <div className="panel">
               <h2>Drafts awaiting review or approval</h2>
@@ -72,14 +76,14 @@ export default function Landing({ me }) {
             </div>
             <div className="panel">
               <h2>Recently created processes</h2>
-              {d.recentlyCreated.length ? <ul className="list">{d.recentlyCreated.map((p) => <li key={p.processId}><a href={`#/library/${p.processId}`}>{p.title}</a><span className="small muted">{p.processId} · v{p.version}</span></li>)}</ul> : <p className="empty">Nothing published yet.</p>}
+              {d.recentlyCreated.length ? <ul className="list">{d.recentlyCreated.map((p) => <li key={p.processId}><a href={`#/library/${p.processId}`}>{p.title}</a><span className="small muted">{p.processId} · v{p.version}</span></li>)}</ul> : <p className="empty">Nothing published yet. Your first recording will appear here.</p>}
             </div>
             <div className="panel">
               <h2>Recently updated processes</h2>
               {d.recentlyUpdated.length ? <ul className="list">{d.recentlyUpdated.map((p) => <li key={p.processId}><a href={`#/library/${p.processId}`}>{p.title}</a><span className="small muted">{p.processId} · v{p.version}</span></li>)}</ul> : <p className="empty">No updates yet.</p>}
             </div>
           </div>
-          <p className="small muted" style={{ textAlign: 'center' }}>Repository: {d.repository.label} · Documentation engine: {d.aiEngine === 'rules' ? 'rule-based (no AI model configured)' : d.aiEngine} · Signed in as {me?.name}</p>
+          {isAdmin && <p className="footnote">Repository: {d.repository.label} · Documentation engine: {d.aiEngine === 'rules' ? 'rule-based (no AI model configured)' : d.aiEngine} · Signed in as {me?.name}</p>}
         </>
       )}
     </>

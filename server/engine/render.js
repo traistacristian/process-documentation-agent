@@ -2,7 +2,7 @@
 // Markdown (used for previews and the plain-text copy kept next to the Word file).
 // Fixed texts follow the document language (English or German).
 import fs from 'node:fs';
-import { Document, Packer, Paragraph, HeadingLevel, TextRun, Table, TableRow, TableCell, WidthType, ImageRun, AlignmentType, BorderStyle } from 'docx';
+import { Document, Packer, Paragraph, HeadingLevel, TextRun, Table, TableRow, TableCell, WidthType, ImageRun, AlignmentType, BorderStyle, Header, Footer, PageNumber } from 'docx';
 
 const LABELS = {
   en: {
@@ -13,7 +13,7 @@ const LABELS = {
     step: 'Step', app: 'Application / system', input: 'Required input', result: 'Expected result', screenshot: 'Screenshot', note: 'Note', warning: 'Warning',
     figure: 'Figure', notAvailable: 'not available', noDecisions: 'No decision points recorded.', ifThen: (c, a) => `If ${c}, then ${a}`, stepRef: (n) => `step ${n}`,
     exc: ['Problem', 'Handling / recovery', 'Escalation'], noIssues: 'No known issues recorded.', issue: ['Issue', 'Resolution'], none: 'None.',
-    role: ['Role', 'Responsibilities'], history: ['Version', 'Date', 'Author', 'Approver', 'Summary'], subtitle: 'IT Process Documentation',
+    role: ['Role', 'Responsibilities'], history: ['Version', 'Date', 'Author', 'Approver', 'Summary'], subtitle: 'IT Process Documentation', eyebrow: 'IT WORK INSTRUCTION', page: 'Page', of: 'of', steps: 'Steps',
   },
   de: {
     sections: ['Prozessinformationen', 'Zweck', 'Geltungsbereich', 'Voraussetzungen', 'Rollen und Verantwortlichkeiten', 'Prozessablauf – Schritt für Schritt', 'Entscheidungspunkte und Ausnahmen', 'Erwartetes Ergebnis', 'Fehlerbehebung', 'Zugehörige Dokumentation', 'Änderungshistorie'],
@@ -23,7 +23,7 @@ const LABELS = {
     step: 'Schritt', app: 'Anwendung / System', input: 'Erforderliche Eingabe', result: 'Erwartetes Ergebnis', screenshot: 'Screenshot', note: 'Hinweis', warning: 'Warnung',
     figure: 'Abbildung', notAvailable: 'nicht verfügbar', noDecisions: 'Keine Entscheidungspunkte erfasst.', ifThen: (c, a) => `Wenn ${c}, dann ${a}`, stepRef: (n) => `Schritt ${n}`,
     exc: ['Problem', 'Behandlung / Wiederherstellung', 'Eskalation'], noIssues: 'Keine bekannten Probleme erfasst.', issue: ['Problem', 'Lösung'], none: 'Keine.',
-    role: ['Rolle', 'Verantwortlichkeiten'], history: ['Version', 'Datum', 'Autor', 'Freigabe', 'Zusammenfassung'], subtitle: 'IT-Prozessdokumentation',
+    role: ['Rolle', 'Verantwortlichkeiten'], history: ['Version', 'Datum', 'Autor', 'Freigabe', 'Zusammenfassung'], subtitle: 'IT-Prozessdokumentation', eyebrow: 'IT-ARBEITSANWEISUNG', page: 'Seite', of: 'von', steps: 'Schritte',
   },
 };
 export const labelsFor = (d) => LABELS[d?.info?.language] || LABELS.en;
@@ -72,7 +72,7 @@ const bullets = (arr) => (arr?.length ? arr.map((x) => new Paragraph({ text: x, 
 const cell = (text, bold = false, shade) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(text ?? ''), bold })] })], shading: shade ? { fill: shade } : undefined });
 const table = (rows, header) => new Table({
   width: { size: 100, type: WidthType.PERCENTAGE },
-  rows: [...(header ? [new TableRow({ tableHeader: true, children: header.map((h) => cell(h, true, 'E7EEF7')) })] : []), ...rows.map((r) => new TableRow({ children: r.map((c, i) => cell(c, !header && i === 0)) }))],
+  rows: [...(header ? [new TableRow({ tableHeader: true, children: header.map((h) => cell(h, true, 'E2F2EF')) })] : []), ...rows.map((r) => new TableRow({ children: r.map((c, i) => cell(c, !header && i === 0)) }))],
   borders: { top: { style: BorderStyle.SINGLE, size: 2, color: 'BFC8D6' }, bottom: { style: BorderStyle.SINGLE, size: 2, color: 'BFC8D6' }, left: { style: BorderStyle.SINGLE, size: 2, color: 'BFC8D6' }, right: { style: BorderStyle.SINGLE, size: 2, color: 'BFC8D6' }, insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: 'D9DFE8' }, insideVertical: { style: BorderStyle.SINGLE, size: 1, color: 'D9DFE8' } },
 });
 
@@ -91,11 +91,23 @@ function imageSize(buf) {
 }
 
 // resolveShot(id) -> absolute path of the screenshot file or null
+const BRAND = '0B6E66';
+
 export async function renderDocx(d, resolveShot = () => null) {
   const T = labelsFor(d); const SECTIONS = T.sections; TBD = T.tbd;
+  // Cover page: title, purpose and key facts, then the ten sections from page 2.
+  const cover = [
+    new Paragraph({ children: [], spacing: { before: 2400 } }),
+    new Paragraph({ children: [new TextRun({ text: T.eyebrow, bold: true, size: 20, color: BRAND, characterSpacing: 40 })], spacing: { after: 160 } }),
+    new Paragraph({ children: [new TextRun({ text: d.info.title, bold: true, size: 60, color: '14212B' })], spacing: { after: 240 } }),
+    ...(d.purpose ? [new Paragraph({ children: [new TextRun({ text: d.purpose, size: 24, color: '5A6B76' })], spacing: { after: 240 } })] : []),
+    new Paragraph({ children: [], border: { bottom: { style: BorderStyle.SINGLE, size: 24, color: BRAND, space: 1 } }, spacing: { after: 360 } }),
+    table([
+      [T.info[1], d.info.processId], [T.info[2], `${d.info.version} · ${d.info.status}`], [T.info[5], d.info.owner || '–'],
+      [T.info[6], d.info.department || '–'], [T.info[9], d.info.approver || '–'], [T.info[4], d.info.updatedAt?.slice(0, 10) || '–'], [T.steps, String(d.steps.length)],
+    ]),
+  ];
   const children = [
-    new Paragraph({ children: [new TextRun({ text: d.info.title, bold: true, size: 40, color: '1F3A5F' })], spacing: { after: 120 } }),
-    new Paragraph({ children: [new TextRun({ text: `${T.subtitle} · ${d.info.processId} · Version ${d.info.version} · ${d.info.status}`, color: '5B6B80', size: 20 })], spacing: { after: 240 } }),
     H(`1. ${SECTIONS[0]}`), table(infoRows(d, T).map(([k, v]) => [k, v || '–'])),
     H(`2. ${SECTIONS[1]}`), P(d.purpose || TBD, { italics: !d.purpose }),
     H(`3. ${SECTIONS[2]}`), P(T.included, { bold: true }), ...bullets(d.scope.included), P(T.excluded, { bold: true }), ...bullets(d.scope.excluded),
@@ -130,8 +142,15 @@ export async function renderDocx(d, resolveShot = () => null) {
 
   const doc = new Document({
     creator: 'Process Documentation Agent', title: d.info.title, description: `${d.info.processId} v${d.info.version}`,
-    styles: { default: { document: { run: { font: 'Segoe UI', size: 21 } } } },
-    sections: [{ children }],
+    styles: { default: { document: { run: { font: 'Segoe UI', size: 21 } }, heading1: { run: { font: 'Segoe UI', size: 30, bold: true, color: '08534D' }, paragraph: { spacing: { before: 360, after: 120 } } }, heading2: { run: { font: 'Segoe UI', size: 24, bold: true, color: '14212B' } } } },
+    sections: [
+      { children: cover },
+      {
+        headers: { default: new Header({ children: [new Paragraph({ children: [new TextRun({ text: `${d.info.title} · ${d.info.processId} · v${d.info.version}`, size: 16, color: '8A99A3' })], alignment: AlignmentType.RIGHT })] }) },
+        footers: { default: new Footer({ children: [new Paragraph({ children: [new TextRun({ text: `${T.subtitle} · ${T.page} `, size: 16, color: '8A99A3' }), new TextRun({ children: [PageNumber.CURRENT], size: 16, color: '8A99A3' }), new TextRun({ text: ` ${T.of} `, size: 16, color: '8A99A3' }), new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 16, color: '8A99A3' })], alignment: AlignmentType.CENTER })] }) },
+        children,
+      },
+    ],
   });
   return Packer.toBuffer(doc);
 }

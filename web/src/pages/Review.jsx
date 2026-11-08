@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, download, getConfig } from '../api.js';
 import { usePoll, fmtDate, StatusBadge } from '../util.jsx';
-import DocEditor from '../components/DocEditor.jsx';
+import DocEditor, { sectionStatus } from '../components/DocEditor.jsx';
 import DiffView from '../components/DiffView.jsx';
 import DocPreview from '../components/DocPreview.jsx';
 
@@ -49,10 +49,20 @@ export default function Review({ id, me }) {
           <div>
             <h1 style={{ marginBottom: 4 }}>{doc.info.title}</h1>
             <div className="row small muted"><StatusBadge s={d.status} /><span>{d.mode === 'update' ? `Update of ${d.baseRef.processId} (current v${d.baseRef.version})` : `New process ${doc.info.processId}`}</span>
-              <span>· recorded by {d.createdBy.name}</span><span>· {d.engine === 'rules' ? 'written by the rule-based engine (no AI model configured)' : `written by ${d.engine}`}</span></div>
+              <span>· recorded by {d.createdBy.name}</span><span>· {d.engine === 'rules' ? 'drafted automatically from the recording' : 'drafted by AI from the recording'}</span></div>
           </div>
           <button className="btn" onClick={() => download(`/api/drafts/${id}/preview.docx`, `${doc.info.processId}.docx`).catch((e) => setErr(e.message))}>⬇ Word preview</button>
         </div>
+        {editable && (() => {
+          const st = sectionStatus(doc); const req = st.filter((x) => !x.optional); const done = req.filter((x) => x.done).length;
+          return (
+            <div className="progress" data-testid="progress">
+              <div className="row between small"><b>{done === req.length ? 'All required sections are complete' : `${done} of ${req.length} required sections complete`}</b><span className="muted">{Math.round((done / req.length) * 100)}%</span></div>
+              <div className="bar"><i style={{ width: `${(done / req.length) * 100}%` }} /></div>
+              <div className="chips">{st.map((x) => <a key={x.n} href={`#/review/${id}`} className={x.done ? 'done' : ''} onClick={(e) => { e.preventDefault(); setTab('doc'); setTimeout(() => document.getElementById(`sec-${x.n}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); }}>{x.done ? '✓ ' : ''}{x.n}. {x.title}{x.optional ? ' (optional)' : ''}</a>)}</div>
+            </div>
+          );
+        })()}
         {err && <div className="alert err" style={{ marginTop: 12 }} data-testid="error">{err}</div>}
         {msg && <div className="alert ok" style={{ marginTop: 12 }}>{msg}</div>}
         {d.status === 'published' && <div className="alert ok" style={{ marginTop: 12 }} data-testid="published">Published to {repoName} as version <b>{d.published.version}</b> on {fmtDate(d.published.at)}. <a href={d.published.webUrl} target="_blank" rel="noreferrer">Open the published document</a> · <a href={`#/library/${d.published.processId}`}>View in library</a>
@@ -92,7 +102,7 @@ export default function Review({ id, me }) {
         </div>
       )}
       {tab === 'sugg' && <div className="panel"><h2>Suggested improvements</h2>{d.suggestions.length ? <ul>{d.suggestions.map((s, i) => <li key={i}>{s}</li>)}</ul> : <p className="empty">No suggestions.</p>}<p className="small muted">Suggestions are not added to the document automatically.</p></div>}
-      {tab === 'preview' && <div className="panel"><p className="small muted">This is the document that will be published{d.mode === 'update' ? ', with your accept / reject decisions applied' : ''}.</p><DocPreview doc={d.publishedDoc || d.approvedDoc || d.mergedDoc || doc} shotUrl={shotUrl} /></div>}
+      {tab === 'preview' && <div><p className="small muted" style={{ textAlign: 'center' }}>This is the document that will be published{d.mode === 'update' ? ', with your accept / reject decisions applied' : ''}.</p><DocPreview doc={d.publishedDoc || d.approvedDoc || d.mergedDoc || doc} shotUrl={shotUrl} /></div>}
 
       <div className="sticky-actions">
         <div className="row">

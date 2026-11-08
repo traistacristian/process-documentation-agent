@@ -8,8 +8,33 @@ const LinesField = ({ label, value, onChange, disabled, testid }) => (
   </label>
 );
 
+// Which of the ten sections are filled in; drives the progress bar on the review page.
+export function sectionStatus(doc) {
+  const has = (a) => (a || []).some((x) => String(x).trim());
+  return [
+    { n: 1, title: 'Process information', done: !!(doc.info.title && doc.info.owner && doc.info.department) },
+    { n: 2, title: 'Purpose', done: !!doc.purpose.trim() },
+    { n: 3, title: 'Scope', done: has(doc.scope.included) },
+    { n: 4, title: 'Prerequisites', done: has(doc.prerequisites.permissions) || has(doc.prerequisites.access) },
+    { n: 5, title: 'Roles', done: doc.roles.length > 0 },
+    { n: 6, title: 'Steps', done: doc.steps.length > 0 && doc.steps.every((x) => x.instructions.length && !x.warnings.length) },
+    { n: 7, title: 'Decisions', done: doc.decisions.length + doc.exceptions.length > 0, optional: true },
+    { n: 8, title: 'Outcome', done: !!doc.expectedOutcome.trim() },
+    { n: 9, title: 'Troubleshooting', done: doc.troubleshooting.length > 0, optional: true },
+    { n: 10, title: 'Related', done: doc.related.length > 0, optional: true },
+  ];
+}
+
+const Sec = ({ st, title, children, right }) => (
+  <details className="panel sec" open id={`sec-${st.n}`}>
+    <summary><span className={`check ${st.done ? 'on' : ''}`}>✓</span><h2>{st.n}. {title}</h2>{st.optional && !st.done && <span className="small muted">optional</span>}{right}</summary>
+    <div className="body">{children}</div>
+  </details>
+);
+
 export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
   const [zoom, setZoom] = useState(null);
+  const st = sectionStatus(doc);
   const set = (path, v) => {
     const d = structuredClone(doc); let o = d; const p = path.split('.');
     for (const k of p.slice(0, -1)) o = o[k];
@@ -34,35 +59,32 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
   return (
     <div>
       <Lightbox url={zoom} onClose={() => setZoom(null)} />
-      <section className="panel">
-        <h2>1. Process information</h2>
+      <Sec st={st[0]} title="Process information">
         <div className="grid g3" style={{ gap: 12 }}>
           <label className="f">Process title<input value={doc.info.title} disabled={readOnly} onChange={(e) => set('info.title', e.target.value)} /></label>
           <label className="f">Process owner<input value={doc.info.owner} disabled={readOnly} onChange={(e) => set('info.owner', e.target.value)} /></label>
           <label className="f">Responsible department<input value={doc.info.department} disabled={readOnly} onChange={(e) => set('info.department', e.target.value)} /></label>
         </div>
         <p className="small muted">Process ID {doc.info.processId} · version {doc.info.version} (assigned at approval) · author {doc.info.author}</p>
-      </section>
-      <section className="panel">
-        <h2>2. Purpose</h2>
+      </Sec>
+      <Sec st={st[1]} title="Purpose">
         <textarea value={doc.purpose} disabled={readOnly} onChange={(e) => set('purpose', e.target.value)} placeholder="Why does this process exist and what does it achieve?" data-testid="purpose" />
-        <h2 style={{ marginTop: 16 }}>3. Scope</h2>
+      </Sec>
+      <Sec st={st[2]} title="Scope">
         <div className="grid g2" style={{ gap: 12 }}>
           <LinesField label="Included" value={doc.scope.included} onChange={(v) => set('scope.included', v)} disabled={readOnly} />
           <LinesField label="Excluded" value={doc.scope.excluded} onChange={(v) => set('scope.excluded', v)} disabled={readOnly} />
         </div>
-      </section>
-      <section className="panel">
-        <h2>4. Prerequisites</h2>
+      </Sec>
+      <Sec st={st[3]} title="Prerequisites">
         <div className="grid g2" style={{ gap: 12 }}>
           {[['permissions', 'Required permissions'], ['access', 'Required access'], ['systems', 'Applications and systems'], ['information', 'Required information'], ['dependencies', 'Dependencies']].map(([k, l]) => <LinesField key={k} label={l} value={doc.prerequisites[k]} onChange={(v) => set(`prerequisites.${k}`, v)} disabled={readOnly} />)}
         </div>
-        <h2 style={{ marginTop: 8 }}>5. Roles and responsibilities</h2>
+      </Sec>
+      <Sec st={st[4]} title="Roles and responsibilities">
         {pairs('roles', ['role', 'responsibilities'], ['Role', 'Responsibilities'])}
-      </section>
-
-      <section className="panel">
-        <div className="row between"><h2>6. Process execution – step by step</h2>{!readOnly && <button className="btn sm" onClick={addStep}>+ Add step</button>}</div>
+      </Sec>
+      <Sec st={st[5]} title="Process execution – step by step" right={!readOnly && <button className="btn sm" onClick={(e) => { e.preventDefault(); addStep(); }}>+ Add step</button>}>
         {doc.steps.map((s, i) => (
           <div key={s.id} className={`step ${s.important ? 'important' : ''}`} data-testid="step">
             <div className="step-head">
@@ -91,24 +113,23 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
             <p className="small muted" style={{ marginBottom: 0 }}>{s.evidenceEventSeqs.length ? `Based on ${s.evidenceEventSeqs.length} recorded action(s).` : 'Added manually – not based on recorded actions.'}</p>
           </div>
         ))}
-      </section>
-
-      <section className="panel">
-        <h2>7. Decision points and exceptions</h2>
+      </Sec>
+      <Sec st={st[6]} title="Decision points and exceptions">
         <h3>Decision points</h3>
         {pairs('decisions', ['condition', 'action'], ['If (condition)…', '…then (action)'])}
         <h3 style={{ marginTop: 12 }}>Exceptions and error handling</h3>
         {pairs('exceptions', ['problem', 'handling', 'escalation'], ['Problem', 'Handling / recovery', 'Escalation path'])}
-      </section>
-      <section className="panel">
-        <h2>8. Expected outcome</h2>
+      </Sec>
+      <Sec st={st[7]} title="Expected outcome">
         <textarea value={doc.expectedOutcome} disabled={readOnly} onChange={(e) => set('expectedOutcome', e.target.value)} />
         <LinesField label="Verification checks" value={doc.verification} onChange={(v) => set('verification', v)} disabled={readOnly} />
-        <h2>9. Troubleshooting</h2>
+      </Sec>
+      <Sec st={st[8]} title="Troubleshooting">
         {pairs('troubleshooting', ['issue', 'resolution'], ['Known issue', 'Solution'])}
-        <h2 style={{ marginTop: 12 }}>10. Related documentation</h2>
+      </Sec>
+      <Sec st={st[9]} title="Related documentation">
         {pairs('related', ['title', 'url'], ['Title', 'Link (SharePoint, wiki…)'])}
-      </section>
+      </Sec>
     </div>
   );
 }

@@ -132,6 +132,7 @@ export default function Library({ processId }) {
   useEffect(() => { api(`/api/processes?q=${encodeURIComponent(q)}`).then(setList).catch((e) => setErr(e.message)); }, [q]);
   useEffect(() => { if (processId) api(`/api/processes/${processId}${lang ? `?lang=${lang}` : ''}`).then(setP).catch((e) => setErr(e.message)); else setP(null); }, [processId, lang]);
   if (processId && p) return (
+    <>
     <div className="panel">
       <div className="row between"><a href="#/library" className="small">← All processes</a>
         <div className="row"><a className="btn" href={`#/update/${processId}`}>Update this process</a>{p.webUrl && <a className="btn primary" href={p.webUrl} target="_blank" rel="noreferrer">Open published document</a>}</div></div>
@@ -139,8 +140,9 @@ export default function Library({ processId }) {
         {[p.doc.info.language === 'de' && !lang ? 'de' : 'en', ...['en', 'de']].filter((x, i, a) => a.indexOf(x) === i).map((l) => <button key={l} className={`btn sm${(p.doc.info.language || 'en') === l ? ' primary' : ''}`} onClick={() => setLang(l)}>{l === 'de' ? 'Deutsch' : 'English'}</button>)}</div>}
       <GuideButton doc={p.doc} />
       {getConfig()?.aiEngine !== 'rules' && <><ScriptPanel processId={processId} title={p.doc.info.title} /><FlowPanel processId={processId} title={p.doc.info.title} /></>}
-      <DocPreview doc={p.doc} shotUrl={(id) => `/api/processes/${processId}/screenshots/${id}`} />
     </div>
+    <DocPreview doc={p.doc} shotUrl={(id) => `/api/processes/${processId}/screenshots/${id}`} />
+    </>
   );
   return (
     <div className="panel">

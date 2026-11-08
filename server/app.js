@@ -19,6 +19,7 @@ import { generateScript } from './engine/script.js';
 import { generateFlow, flowToMarkdown } from './engine/flow.js';
 import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from './engine/compare.js';
 import { normalizeDoc } from './engine/schema.js';
+import { sampleDocs } from './engine/samples.js';
 import { applyAnswer } from './engine/clarify.js';
 import { renderDocx, renderMarkdown } from './engine/render.js';
 import { createRepository } from './repo/index.js';
@@ -618,6 +619,8 @@ export function createApp(cfg, deps = {}) {
         updatedRecently: processes.filter((p) => Date.parse(p.updatedAt) > since && p.version !== '1.0').length,
         draftsAwaiting: drafts.filter((d) => ['draft', 'approved'].includes(d.status)).length,
         recordings: sessions.length,
+        // Rough estimate shown to management: by hand about 30 min + 5 min per step, with the agent about 10 min of review.
+        hoursSaved: Math.round(processes.reduce((t, p) => t + 20 + 5 * (p.stepCount ?? 8), 0) / 6) / 10,
       },
       recentlyCreated: processes.filter((p) => p.version === '1.0').slice(0, 5),
       recentlyUpdated: processes.filter((p) => p.version !== '1.0').slice(0, 5),
@@ -628,6 +631,19 @@ export function createApp(cfg, deps = {}) {
   }));
 
   // ---------------------------------------------------------------- administration
+  // Demo content: publishes a few realistic sample processes (category "Sample"); existing titles are skipped.
+  app.post('/api/admin/samples', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
+    const existing = new Set((await repo.list()).map((p) => p.title));
+    const added = [];
+    for (const doc of sampleDocs({ user: req.user, newProcessId: () => `PRC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}` })) {
+      if (existing.has(doc.info.title)) continue;
+      const r = await repo.publish({ doc, docx: await renderDocx(doc), markdown: renderMarkdown(doc), screenshots: [], expectedEtag: null, publishedBy: req.user, owners: [], translations: [] });
+      added.push({ processId: r.processId, title: doc.info.title });
+    }
+    audit.write(req.user, 'admin.samples_added', { count: added.length });
+    res.json({ added });
+  }));
+
   app.get('/api/admin/settings', requireRole(ROLES.ADMIN), (req, res) => res.json({ categories: cfg.categories, capture: cfg.capture, retention: cfg.retention, notifications: cfg.notifications, repository: { mode: cfg.repository.mode, label: repo.label }, ai: { engine: engineName() }, auth: { mode: cfg.auth.mode, requireSeparateApprover: cfg.auth.requireSeparateApprover } }));
   app.put('/api/admin/settings', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
     const b = req.body || {};

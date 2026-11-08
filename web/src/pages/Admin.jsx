@@ -26,6 +26,11 @@ export default function Admin() {
     } catch (e) { setErr(e.message); }
   };
   const provision = async () => { setErr(null); try { const r = await api('/api/admin/repository/provision', { method: 'POST' }); setMsg(r.message || 'Repository columns and category folders are in place.'); } catch (e) { setErr(e.message); } };
+  const samples = async () => {
+    if (!window.confirm(`Publish 4 sample processes (password reset, new employee, leaver, shared mailbox) to ${repo?.label || 'the repository'}? They use the category "Sample" and can be deleted there at any time.`)) return;
+    setErr(null); setMsg(null);
+    try { const r = await api('/api/admin/samples', { method: 'POST' }); setMsg(r.added.length ? `Added ${r.added.length} sample process(es): ${r.added.map((x) => x.title).join(', ')}.` : 'The sample processes are already there.'); } catch (e) { setErr(e.message); }
+  };
   const retention = async () => { try { const r = await api('/api/admin/retention/run', { method: 'POST' }); setMsg(`Retention applied: ${r.purgedSessions.length} recording(s) purged, ${r.abandoned.length} abandoned recording(s) stopped.`); } catch (e) { setErr(e.message); } };
 
   return (
@@ -38,6 +43,11 @@ export default function Admin() {
           <div className="kv"><div>Destination</div><div>{repo?.label}</div><div>Status</div><div>{repo?.connected ? <span className="badge published">connected</span> : <span className="badge failed">not connected</span>} {repo?.error}</div><div>Documentation engine</div><div>{s.ai.engine === 'rules' ? 'Rule-based (set ANTHROPIC_API_KEY to enable Claude)' : s.ai.engine}</div><div>Authentication</div><div>{s.auth.mode === 'dev' ? 'Prototype test users (not for production)' : 'Microsoft Entra ID'}</div></div>
           {repo?.warning && <div className="alert warn small" style={{ marginTop: 10 }}>{repo.warning}</div>}
           <div className="row" style={{ marginTop: 10 }}><button className="btn" onClick={provision}>Create metadata columns and category folders</button><button className="btn" onClick={retention}>Run retention now</button></div>
+        </div>
+        <div className="panel">
+          <h2>Demo content</h2>
+          <p className="small muted">For presentations and first tests: publishes four realistic sample work instructions, so the home page and the library are not empty. They are marked with the category "Sample".</p>
+          <button className="btn" onClick={samples} data-testid="add-samples">Add sample processes</button>
         </div>
         <div className="panel">
           <h2>Process categories</h2>
