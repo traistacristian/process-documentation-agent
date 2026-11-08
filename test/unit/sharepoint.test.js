@@ -49,7 +49,7 @@ function fakeGraph() {
     if ((r = /\/drives\/d1\/items\/(it\d+):\/(.+?):\/content$/.exec(u))) { const it = byPath(`${items.get(r[1]).path}/${r[2]}`); return it ? new Response(it.content) : json(404, { error: { code: 'itemNotFound', message: 'nf' } }); }
     if ((r = /\/drives\/d1\/items\/(it\d+):\/(.+)$/.exec(u))) { const it = byPath(`${items.get(r[1]).path}/${r[2]}`); return it ? json(200, view(it)) : json(404, { error: { code: 'itemNotFound', message: 'nf' } }); }
     if ((r = /\/drives\/d1\/items\/(it\d+)(\?.*)?$/.exec(u)) && m === 'GET') return json(200, view(items.get(r[1])));
-    if ((r = /\/drives\/d1\/items\/(it\d+)$/.exec(u)) && m === 'PATCH') { const it = items.get(r[1]); const b = JSON.parse(opt.body); it.name = b.name; it.path = it.path.split('/').slice(0, -1).concat(b.name).join('/'); return json(200, view(it)); }
+    if ((r = /\/drives\/d1\/items\/(it\d+)$/.exec(u)) && m === 'PATCH') { const it = items.get(r[1]); const b = JSON.parse(opt.body); const oldPath = it.path; it.name = b.name; it.path = it.path.split('/').slice(0, -1).concat(b.name).join('/'); for (const c of items.values()) if (c.path.startsWith(`${oldPath}/`)) c.path = it.path + c.path.slice(oldPath.length); return json(200, view(it)); }
     if ((r = /\/drives\/d1\/root:\/(.+?)$/.exec(u)) && m === 'GET') { const it = byPath(r[1]); return it ? json(200, view(it)) : json(404, { error: { code: 'itemNotFound', message: 'nf' } }); }
     if (u.endsWith('/drives/d1/root/children') || /\/drives\/d1\/root:\/(.+?):\/children$/.test(u)) {
       const parent = /root:\/(.+?):\/children/.exec(u)?.[1]; const b = JSON.parse(opt.body);
@@ -74,9 +74,9 @@ test('provisioning, publishing, retrieval, versioning and conflict detection via
 
   const shot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pda-sp-')), 'shot_ab.jpg'); fs.writeFileSync(shot, 'jpeg');
   const r1 = await repo.publish({ doc: doc('1.0'), docx: Buffer.from('PK-v1'), screenshots: [{ id: 'shot_ab', path: shot }], expectedEtag: null });
-  assert.equal(r1.location, 'IT Process Documentation/Identity & Access Management/PRC-2026-ABC123');
+  assert.equal(r1.location, 'IT Process Documentation/Identity & Access Management/Grant helpdesk permissions', 'folders are named after the process, not the id');
   const docItem = [...g.items.values()].find((i) => i.name.endsWith('.docx'));
-  assert.equal(docItem.name, 'PRC-2026-ABC123 - Grant helpdesk permissions.docx');
+  assert.equal(docItem.name, 'Grant helpdesk permissions.docx');
   assert.equal(docItem.fields.PDA_Version, '1.0');
   assert.equal(docItem.fields.PDA_Category, 'Identity & Access Management');
 
@@ -94,6 +94,13 @@ test('provisioning, publishing, retrieval, versioning and conflict detection via
   assert.equal((await repo.get('PRC-2026-ABC123')).versions.length, 2);
   await assert.rejects(repo.publish({ doc: doc('1.2'), docx: Buffer.from('x'), screenshots: [], expectedEtag: got.etag }), { code: 'CONFLICT' }, 'stale etag must not overwrite');
   assert.notEqual(r2.etag, got.etag);
+  // The author picks another name: folder and file are renamed in place, history stays on the same item.
+  const d3 = doc('1.2'); d3.info.fileName = 'Helpdesk rights for a user';
+  const r3 = await repo.publish({ doc: d3, docx: Buffer.from('PK-v3'), screenshots: [], expectedEtag: r2.etag });
+  assert.equal(r3.location, 'IT Process Documentation/Identity & Access Management/Helpdesk rights for a user');
+  assert.equal(docItem.name, 'Helpdesk rights for a user.docx');
+  assert.equal(docItem.content.toString(), 'PK-v3');
+  assert.equal((await repo.get('PRC-2026-ABC123')).doc.info.version, '1.2');
 });
 
 test('missing configuration and throttling are handled', async () => {

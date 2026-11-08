@@ -7,7 +7,7 @@ export default function NewProcess({ me }) {
   const [cfg, setCfg] = useState(getConfig());
   // Categories can be changed by an admin at any time: always show the current list.
   useEffect(() => { refreshConfig().then((c) => setCfg({ ...c })); }, []);
-  const [f, setF] = useState({ title: '', description: '', department: '', owner: '', category: '', language: 'en' });
+  const [f, setF] = useState({ title: '', description: '', department: '', owner: '', category: '', language: 'en', fileName: '' });
   const [consent, setConsent] = useState(false); const [dups, setDups] = useState([]); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
@@ -42,6 +42,8 @@ export default function NewProcess({ me }) {
           <select value={f.category} onChange={set('category')}><option value="">Choose…</option>{cfg.categories.map((c) => <option key={c}>{c}</option>)}</select>
         </label>
       </div>
+      <label className="f">Name in SharePoint <span className="opt">(optional – folder and Word file are named like this; you can still change it before publishing)</span>
+        <input value={f.fileName} onChange={set('fileName')} placeholder={f.title || 'e.g. Reset user password - Microsoft 365'} data-testid="file-name" maxLength={120} /></label>
       <label className="f" style={{ maxWidth: 320 }}>Document language
         <select value={f.language} onChange={set('language')} data-testid="language"><option value="en">English</option><option value="de">Deutsch (German)</option></select>
         <span className="small muted">The AI writes the document in this language; on publishing, the other language is added as a translated copy.</span>

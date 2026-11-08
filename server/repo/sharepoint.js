@@ -1,10 +1,10 @@
 // SharePoint Online repository adapter (Microsoft Graph v1.0).
 //
 // Layout in the configured document library:
-//   <rootFolder>/<category>/<processId>/
-//       <processId> - <title>.docx   <- the official document; SharePoint keeps every published version
+//   <rootFolder>/<category>/<name>/          <name> = the readable name chosen by the author (default: title)
+//       <name>.docx                   <- the official document; SharePoint keeps every published version
 //       process.json                  <- machine-readable source used for comparisons on update
-//       <processId> - <title> (DE).docx, process.de.json, translations.json  <- other languages
+//       <name> (DE).docx, process.de.json, translations.json  <- other languages
 //       screenshots/<id>.jpg
 // Metadata columns on the .docx list item (created by ensureSchema): PDA_ProcessId, PDA_Version,
 // PDA_Status, PDA_Owner, PDA_Department, PDA_Category, PDA_Approver.
@@ -174,12 +174,22 @@ export class SharePointRepository {
     if (existing && expectedEtag === null) throw Object.assign(new Error(`Process ${doc.info.processId} already exists in SharePoint`), { status: 409, code: 'DUPLICATE' });
     if (!existing && expectedEtag) throw Object.assign(new Error('The document no longer exists in SharePoint.'), { status: 409, code: 'CONFLICT' });
 
+    // Readable names: folder and Word file are named after doc.info.fileName (default: the title);
+    // the process id stays in the PDA_ProcessId column and inside the document.
+    const name = safe(doc.info.fileName || doc.info.title || doc.info.processId);
     let folderPath;
     if (existing) {
       const parent = await this.graph.get(`/drives/${driveId}/items/${existing.parentId}?$select=name,parentReference`);
-      folderPath = `${decodeURIComponent(parent.parentReference.path.replace(/^.*?root:\/?/, ''))}/${parent.name}`;
+      const base = decodeURIComponent(parent.parentReference.path.replace(/^.*?root:\/?/, ''));
+      let folderName = parent.name;
+      if (folderName !== name) { // renamed: rename the folder in place (keeps every file and its versions)
+        try { await this.graph.patch(`/drives/${driveId}/items/${existing.parentId}`, { name }); folderName = name; } catch (e) { if (e.status !== 409) throw e; }
+      }
+      folderPath = `${base}/${folderName}`;
     } else {
-      folderPath = `${this.sp.rootFolder}/${safe(doc.info.category)}/${safe(doc.info.processId)}`;
+      const catPath = `${this.sp.rootFolder}/${safe(doc.info.category)}`;
+      folderPath = `${catPath}/${name}`;
+      try { await this.graph.get(`/drives/${driveId}/root:/${enc(folderPath)}`); folderPath = `${catPath}/${name} - ${safe(doc.info.processId)}`; } catch (e) { if (e.status !== 404) throw e; }
       await this.#ensureFolder(driveId, `${folderPath}/screenshots`);
     }
     // 1. Optimistic concurrency on the machine-readable source: fails with 412 if someone else published in between.
@@ -191,7 +201,7 @@ export class SharePointRepository {
     }
     for (const s of screenshots) await this.#upload(driveId, `${folderPath}/screenshots`, `${s.id}.jpg`, fs.readFileSync(s.path));
     // 2. The Word document: upload onto the same item so SharePoint version history is preserved.
-    const docName = `${safe(doc.info.processId)} - ${safe(doc.info.title)}.docx`;
+    const docName = `${name}.docx`;
     let docItem;
     if (existing) {
       docItem = await this.graph.put(`/drives/${driveId}/items/${existing.itemId}/content`, docx);
@@ -215,15 +225,15 @@ export class SharePointRepository {
       const prev = existing ? (await this.#readJson(driveId, existing.parentId, 'translations.json'))?.data || {} : {};
       const index = {};
       for (const t of translations) {
-        const name = `${safe(doc.info.processId)} - ${safe(t.doc.info.title)} (${t.language.toUpperCase()}).docx`;
+        const tName = `${name} (${t.language.toUpperCase()}).docx`;
         const old = prev[t.language]?.fileName;
-        if (old && old !== name) {
-          try { const it = await this.graph.get(`/drives/${driveId}/root:/${enc(`${folderPath}/${old}`)}`); await this.graph.patch(`/drives/${driveId}/items/${it.id}`, { name }); } catch (e) { if (e.status !== 404) throw e; }
+        if (old && old !== tName) {
+          try { const it = await this.graph.get(`/drives/${driveId}/root:/${enc(`${folderPath}/${old}`)}`); await this.graph.patch(`/drives/${driveId}/items/${it.id}`, { name: tName }); } catch (e) { if (e.status !== 404) throw e; }
         }
         await this.#upload(driveId, folderPath, `process.${t.language}.json`, Buffer.from(JSON.stringify(t.doc, null, 2)));
-        const it = await this.#upload(driveId, folderPath, name, t.docx);
+        const it = await this.#upload(driveId, folderPath, tName, t.docx);
         if (this.sp.applyMetadata) await this.graph.patch(`/drives/${driveId}/items/${it.id}/listItem/fields`, { Title: t.doc.info.title, PDA_Version: doc.info.version, PDA_Status: doc.info.status, PDA_Category: doc.info.category });
-        index[t.language] = { fileName: name, title: t.doc.info.title, webUrl: it.webUrl };
+        index[t.language] = { fileName: tName, title: t.doc.info.title, webUrl: it.webUrl };
         published.push({ language: t.language, webUrl: it.webUrl });
       }
       await this.#upload(driveId, folderPath, 'translations.json', Buffer.from(JSON.stringify(index, null, 2)));

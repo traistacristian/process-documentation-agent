@@ -26,6 +26,8 @@ import { applyRetention } from './retention.js';
 
 const ACTIVE = ['recording', 'paused'];
 const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
+// A name that is valid for SharePoint folders and files (no \ / : * ? " < > | # % or leading dots).
+const cleanFileName = (n) => String(n || '').replace(/[\\/:*?"<>|#%\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').replace(/^[.\s]+|[.\s]+$/g, '').slice(0, 120);
 const httpError = (status, message, code) => Object.assign(new Error(message), { status, code });
 
 export function createApp(cfg, deps = {}) {
@@ -247,7 +249,7 @@ export function createApp(cfg, deps = {}) {
     } else {
       const title = String(b.title || '').trim();
       if (!title) throw httpError(400, 'Process title is required');
-      meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : ''), language: b.language === 'de' ? 'de' : 'en' };
+      meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : ''), language: b.language === 'de' ? 'de' : 'en', fileName: cleanFileName(b.fileName) };
     }
     const s = {
       id: newId('ses'), mode, meta, baseRef, status: 'recording', createdBy: { id: req.user.id, name: req.user.name },
@@ -398,6 +400,7 @@ export function createApp(cfg, deps = {}) {
       applyStepDescriptions(result, latest.stepDescriptions, aiTexts(latest));
       const doc = result.doc;
       doc.info.language = s.meta.language === 'de' ? 'de' : 'en';
+      doc.info.fileName = s.meta.fileName || s.baseRef?.doc?.info?.fileName || '';
       attachTargets(doc, events);
       if (s.mode === 'new') {
         doc.info.processId = `PRC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
@@ -536,6 +539,9 @@ export function createApp(cfg, deps = {}) {
     const d = loadDraft(req);
     if (d.status !== 'approved' || !d.approvedDoc) throw httpError(409, 'Only approved documentation can be published');
     const doc = structuredClone(d.approvedDoc); doc.info.status = 'Published';
+    // The name in SharePoint can still be chosen at this point; default: the one given at the start, else the title.
+    if (req.body?.fileName !== undefined) doc.info.fileName = cleanFileName(req.body.fileName);
+    doc.info.fileName = doc.info.fileName || cleanFileName(doc.info.title);
     const baseShots = await baseShotsToTemp(d, doc);
     const resolve = (id) => shotResolver(d)(id) || baseShots.find((x) => x.id === id)?.path || null;
     const used = [...new Set(doc.steps.flatMap((s) => s.screenshotIds))];

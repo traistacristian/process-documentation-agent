@@ -28,6 +28,7 @@ export const DocSchema = z.object({
     processId: str, title: str, version: str, createdAt: str, updatedAt: str,
     owner: str, department: str, category: str, author: str, approver: str, status: str,
     language: z.enum(['en', 'de']),
+    fileName: str, // name of the folder and Word file in SharePoint ('' = the title)
   }),
   purpose: str,
   scope: z.object({ included: strList, excluded: strList }),
@@ -51,7 +52,7 @@ export const ClarificationSchema = z.object({
 export function emptyDoc(info = {}) {
   const now = new Date().toISOString();
   return {
-    info: { processId: '', title: '', version: '0.1', createdAt: now, updatedAt: now, owner: '', department: '', category: '', author: '', approver: '', status: 'Draft', language: 'en', ...info },
+    info: { processId: '', title: '', version: '0.1', createdAt: now, updatedAt: now, owner: '', department: '', category: '', author: '', approver: '', status: 'Draft', language: 'en', fileName: '', ...info },
     purpose: '', scope: { included: [], excluded: [] },
     prerequisites: { permissions: [], access: [], systems: [], information: [], dependencies: [] },
     roles: [], steps: [], decisions: [], exceptions: [], expectedOutcome: '', verification: [],
