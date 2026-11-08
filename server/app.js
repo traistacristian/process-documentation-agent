@@ -249,8 +249,8 @@ export function createApp(cfg, deps = {}) {
     } else {
       const title = String(b.title || '').trim();
       if (!title) throw httpError(400, 'Process title is required');
-      if (!cleanFileName(b.fileName)) throw httpError(400, 'The name in SharePoint is required');
-      meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : ''), language: b.language === 'de' ? 'de' : 'en', fileName: cleanFileName(b.fileName) };
+      if (!cleanFileName(title)) throw httpError(400, 'The process name must contain letters or digits');
+      meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : ''), language: b.language === 'de' ? 'de' : 'en', fileName: cleanFileName(b.fileName || title) };
     }
     const s = {
       id: newId('ses'), mode, meta, baseRef, status: 'recording', createdBy: { id: req.user.id, name: req.user.name },
@@ -541,11 +541,14 @@ export function createApp(cfg, deps = {}) {
     if (d.status !== 'approved' || !d.approvedDoc) throw httpError(409, 'Only approved documentation can be published');
     const doc = structuredClone(d.approvedDoc); doc.info.status = 'Published';
     // The name in SharePoint can still be chosen at this point; default: the one given at the start, else the title.
-    if (req.body?.fileName !== undefined) {
-      doc.info.fileName = cleanFileName(req.body.fileName);
-      if (!doc.info.fileName) throw httpError(400, 'The name in SharePoint is required');
+    // The process name is also its title in SharePoint (title column, folder, Word file) and can
+    // still be changed by the approver right before publishing.
+    if (req.body?.name !== undefined || req.body?.fileName !== undefined) {
+      const name = String(req.body.name ?? req.body.fileName).replace(/\s+/g, ' ').trim().slice(0, 200);
+      if (!cleanFileName(name)) throw httpError(400, 'The process name is required');
+      doc.info.title = name; doc.info.fileName = cleanFileName(name);
     }
-    doc.info.fileName = doc.info.fileName || cleanFileName(doc.info.title);
+    doc.info.fileName = cleanFileName(doc.info.title) || doc.info.fileName;
     const baseShots = await baseShotsToTemp(d, doc);
     const resolve = (id) => shotResolver(d)(id) || baseShots.find((x) => x.id === id)?.path || null;
     const used = [...new Set(doc.steps.flatMap((s) => s.screenshotIds))];

@@ -7,7 +7,7 @@ export default function NewProcess({ me }) {
   const [cfg, setCfg] = useState(getConfig());
   // Categories can be changed by an admin at any time: always show the current list.
   useEffect(() => { refreshConfig().then((c) => setCfg({ ...c })); }, []);
-  const [f, setF] = useState({ title: '', description: '', department: '', owner: '', category: '', language: 'en', fileName: '' });
+  const [f, setF] = useState({ title: '', description: '', department: '', owner: '', category: '', language: 'en' });
   const [consent, setConsent] = useState(false); const [dups, setDups] = useState([]); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
@@ -27,7 +27,7 @@ export default function NewProcess({ me }) {
       <h1>Create new process recording</h1>
       <p className="muted">Tell us which process you are about to perform. Only the title is required.</p>
       {err && <div className="alert err">{err}</div>}
-      <label className="f">Process title <input required value={f.title} onChange={set('title')} placeholder="e.g. Grant a user access to a shared mailbox" data-testid="title" autoFocus /></label>
+      <label className="f">Process name <span className="opt">(required – also the title, folder and Word file name in SharePoint, so choose a name people will search for; it can still be changed before publishing)</span><input required value={f.title} onChange={set('title')} placeholder="e.g. Reset user password - Microsoft 365" maxLength={120} data-testid="title" autoFocus /></label>
       {dups.length > 0 && (
         <div className="alert warn">
           <b>A similar process is already documented.</b> If it describes the same activity, update it instead of creating a duplicate.
@@ -42,15 +42,13 @@ export default function NewProcess({ me }) {
           <select value={f.category} onChange={set('category')}><option value="">Choose…</option>{cfg.categories.map((c) => <option key={c}>{c}</option>)}</select>
         </label>
       </div>
-      <label className="f">Name in SharePoint <span className="opt">(required – folder and Word file are named like this, so choose a name people will search for; you can still change it before publishing)</span>
-        <input required value={f.fileName} onChange={set('fileName')} placeholder="e.g. Reset user password - Microsoft 365" data-testid="file-name" maxLength={120} /></label>
       <label className="f" style={{ maxWidth: 320 }}>Document language
         <select value={f.language} onChange={set('language')} data-testid="language"><option value="en">English</option><option value="de">Deutsch (German)</option></select>
         <span className="small muted">The AI writes the document in this language; on publishing, the other language is added as a translated copy.</span>
       </label>
       <Consent checked={consent} onChange={setConsent} />
       <div className="row" style={{ marginTop: 16 }}>
-        <button className="btn danger big" disabled={!f.title.trim() || !f.fileName.trim() || !consent || busy} data-testid="start">● Start Recording</button>
+        <button className="btn danger big" disabled={!f.title.trim() || !consent || busy} data-testid="start">● Start Recording</button>
         <a className="btn" href="#/">Cancel</a>
       </div>
     </form>

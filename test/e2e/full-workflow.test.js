@@ -88,7 +88,6 @@ test('new process: capture real browser activity, generate, review, approve and 
   await snap(app, '01-landing');
   await app.getByTestId('choice-new').click();
   await app.getByTestId('title').fill('Grant helpdesk permissions to a user');
-  await app.getByTestId('file-name').fill('Grant helpdesk permissions');
   await startRecording(app);
 
   const portal = await ctx.newPage();

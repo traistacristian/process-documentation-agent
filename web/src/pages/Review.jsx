@@ -40,7 +40,7 @@ export default function Review({ id, me }) {
   const answer = (c, status) => save({ clarifications: [{ id: c.id, status, answer: answers[c.id] || '' }], silent: true });
   const approve = () => call(() => api(`/api/drafts/${id}/approve`, { method: 'POST', body: { summary } }), 'Approved. You can now publish this version.');
   const reject = () => call(() => api(`/api/drafts/${id}/reject`, { method: 'POST', body: { reason } }), 'The draft was rejected and returned to the author.').then(() => setRejectOpen(false));
-  const publish = () => call(() => api(`/api/drafts/${id}/publish`, { method: 'POST', body: { fileName: pubName ?? (d.approvedDoc?.info.fileName || d.approvedDoc?.info.title || '') } }));
+  const publish = () => call(() => api(`/api/drafts/${id}/publish`, { method: 'POST', body: { name: pubName ?? (d.approvedDoc?.info.title || '') } }));
 
   return (
     <>
@@ -99,8 +99,8 @@ export default function Review({ id, me }) {
           {editable && <button className="btn" onClick={() => save()} disabled={busy || !dirty} data-testid="save">{dirty ? 'Save as draft' : 'Saved'}</button>}
           {editable && isApprover && <><input value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="Change summary (optional)" style={{ width: 260, marginTop: 0 }} /><button className="btn ok" onClick={approve} disabled={busy || dirty || d.blockers.length > 0} data-testid="approve" title={dirty ? 'Save your edits first' : ''}>✓ Approve</button></>}
           {isApprover && ['draft', 'approved'].includes(d.status) && <button className="btn" onClick={() => setRejectOpen(!rejectOpen)} disabled={busy}>Reject</button>}
-          {d.status === 'approved' && isApprover && <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>Name in SharePoint <input value={pubName ?? (d.approvedDoc?.info.fileName || d.approvedDoc?.info.title || '')} onChange={(e) => setPubName(e.target.value)} maxLength={120} style={{ width: 280, marginTop: 0 }} data-testid="publish-name" /></label>}
-          {d.status === 'approved' && isApprover && <button className="btn primary" onClick={publish} disabled={busy || !String(pubName ?? (d.approvedDoc?.info.fileName || d.approvedDoc?.info.title || '')).trim()} data-testid="publish">{busy ? 'Publishing…' : `Publish to ${cfg.repository.mode === 'sharepoint' ? 'SharePoint' : 'repository (local)'}`}</button>}
+          {d.status === 'approved' && isApprover && <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>Process name (title in SharePoint) <input required value={pubName ?? (d.approvedDoc?.info.title || '')} onChange={(e) => setPubName(e.target.value)} maxLength={120} style={{ width: 280, marginTop: 0 }} data-testid="publish-name" /></label>}
+          {d.status === 'approved' && isApprover && <button className="btn primary" onClick={publish} disabled={busy || !String(pubName ?? (d.approvedDoc?.info.title || '')).trim()} data-testid="publish">{busy ? 'Publishing…' : `Publish to ${cfg.repository.mode === 'sharepoint' ? 'SharePoint' : 'repository (local)'}`}</button>}
           {!isApprover && editable && <span className="small muted">An approver will review and publish this draft.</span>}
           {dirty && <span className="small" style={{ color: 'var(--warn)' }}>Unsaved changes</span>}
         </div>
