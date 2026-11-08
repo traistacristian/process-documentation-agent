@@ -12,6 +12,9 @@ import { generateWithRules } from './engine/generate-rules.js';
 import { generateWithClaude, aiAvailable, aiProvider } from './engine/generate-llm.js';
 import { applyStepDescriptions, findDescription } from './engine/describe.js';
 import { describeStepWithClaude, aiDescribeEnabled } from './engine/describe-ai.js';
+import { protectScreenshot } from './engine/privacy.js';
+import { attachTargets } from './engine/targets.js';
+import { translateDoc, otherLanguages } from './engine/translate.js';
 import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from './engine/compare.js';
 import { normalizeDoc } from './engine/schema.js';
 import { applyAnswer } from './engine/clarify.js';
@@ -72,7 +75,8 @@ export function createApp(cfg, deps = {}) {
       store.put('sessions', cur);
     };
     Promise.resolve()
-      .then(() => describeStep({ cfg, step: st, screenshot }))
+      .then(() => (id ? shotReady(sessionId, id) : null))
+      .then(() => describeStep({ cfg, step: st, screenshot, language: store.get('sessions', sessionId)?.meta?.language }))
       .then((text) => remember({ text }), (e) => { remember({ text: '', error: e.message }); audit.write(null, 'step.ai_describe_failed', { sessionId, error: e.message }); })
       .finally(() => aiDescribing.delete(key));
     return true;
@@ -149,8 +153,32 @@ export function createApp(cfg, deps = {}) {
     if (!m) throw httpError(400, 'Expected a data URL with a JPEG or PNG image');
     const buf = Buffer.from(m[2], 'base64');
     if (buf.length > 8 * 1024 * 1024) throw httpError(413, 'Screenshot too large');
-    return store.saveScreenshot(s.id, buf, m[1]);
+    const saved = store.saveScreenshot(s.id, buf, m[1]);
+    protectShot(s.id, saved.id);
+    return saved;
   }
+
+  // GDPR: personal data in each screenshot is pixelated before anyone sees it (Claude finds it).
+  // Viewing, describing and generating wait for the check of a screenshot to finish.
+  const protectFn = deps.protectScreenshot || protectScreenshot;
+  const translate = deps.translateDoc || translateDoc;
+  const privacyJobs = new Map();
+  const blurEnabled = () => cfg.capture.blurPersonalData !== false && aiAvailable(cfg);
+  function protectShot(sessionId, shotId) {
+    if (!blurEnabled()) return;
+    const key = `${sessionId}:${shotId}`;
+    const job = Promise.resolve()
+      .then(() => protectFn({ cfg, path: store.screenshotPath(sessionId, shotId) }))
+      .then((r) => { if (r.count) audit.write(null, 'screenshot.personal_data_blurred', { sessionId, shotId, areas: r.count, kinds: r.kinds }); },
+        (e) => audit.write(null, 'screenshot.privacy_check_failed', { sessionId, shotId, error: e.message }))
+      .finally(() => privacyJobs.delete(key));
+    privacyJobs.set(key, job);
+  }
+  const shotReady = (sessionId, shotId) => privacyJobs.get(`${sessionId}:${shotId}`) || null;
+  const sessionShotsReady = (sessionId, timeoutMs = 120000) => Promise.race([
+    Promise.all([...privacyJobs].filter(([k]) => k.startsWith(`${sessionId}:`)).map(([, p]) => p)),
+    new Promise((r) => setTimeout(r, timeoutMs).unref()),
+  ]);
 
   app.post('/api/capture/events', captureAuth, wrap(async (req, res) => res.json(ingestEvents(req.session, req.body?.events, req.body?.source))));
   app.post('/api/capture/screenshots', captureAuth, wrap(async (req, res) => res.json(saveShot(req.session, req.body))));
@@ -168,7 +196,8 @@ export function createApp(cfg, deps = {}) {
     res.json(all.map((p) => ({ ...p, score: similarity({ title }, { title: p.title }) })).filter((p) => p.score >= 0.6).sort((a, b) => b.score - a.score).slice(0, 5));
   }));
   app.get('/api/processes/:pid', wrap(async (req, res) => {
-    const p = await repo.get(req.params.pid);
+    const language = /^[a-z]{2}$/.test(req.query.lang || '') ? req.query.lang : undefined;
+    const p = (language && await repo.get(req.params.pid, { language })) || await repo.get(req.params.pid);
     if (!p) return res.status(404).json({ error: 'Process not found' });
     res.json(p);
   }));
@@ -193,11 +222,11 @@ export function createApp(cfg, deps = {}) {
       const p = await repo.get(String(b.processId || ''));
       if (!p) throw httpError(404, 'Process not found in the repository');
       baseRef = { processId: p.doc.info.processId, version: p.doc.info.version, etag: p.etag, doc: p.doc };
-      meta = { title: p.doc.info.title, description: '', department: p.doc.info.department, owner: p.doc.info.owner, category: p.doc.info.category };
+      meta = { title: p.doc.info.title, description: '', department: p.doc.info.department, owner: p.doc.info.owner, category: p.doc.info.category, language: p.doc.info.language || 'en' };
     } else {
       const title = String(b.title || '').trim();
       if (!title) throw httpError(400, 'Process title is required');
-      meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : '') };
+      meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : ''), language: b.language === 'de' ? 'de' : 'en' };
     }
     const s = {
       id: newId('ses'), mode, meta, baseRef, status: 'recording', createdBy: { id: req.user.id, name: req.user.name },
@@ -303,6 +332,7 @@ export function createApp(cfg, deps = {}) {
   app.post('/api/sessions/:id/screenshots', wrap(async (req, res) => res.json(saveShot(loadSession(req), req.body))));
   app.get('/api/sessions/:id/screenshots/:shot', wrap(async (req, res) => {
     const s = loadSession(req);
+    await shotReady(s.id, req.params.shot);
     const p = store.screenshotPath(s.id, req.params.shot);
     if (!p) return res.status(404).end();
     res.sendFile(p);
@@ -327,6 +357,7 @@ export function createApp(cfg, deps = {}) {
   }));
 
   async function runGeneration(draftId, s, events, user, requested) {
+    await sessionShotsReady(s.id);
     const draft = store.get('drafts', draftId);
     const shots = store.listScreenshots(s.id).map((id) => ({ id, path: store.screenshotPath(s.id, id), mime: store.screenshotPath(s.id, id).endsWith('.png') ? 'image/png' : 'image/jpeg' }));
     const input = { cfg, meta: s.meta, events, screenshots: shots, screenshotsAvailable: new Set(shots.map((x) => x.id)), base: s.baseRef?.doc || null, user };
@@ -345,6 +376,8 @@ export function createApp(cfg, deps = {}) {
       const latest = store.get('sessions', s.id) || s;
       applyStepDescriptions(result, latest.stepDescriptions, aiTexts(latest));
       const doc = result.doc;
+      doc.info.language = s.meta.language === 'de' ? 'de' : 'en';
+      attachTargets(doc, events);
       if (s.mode === 'new') {
         doc.info.processId = `PRC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
         doc.info.version = '0.1'; doc.info.createdAt = new Date().toISOString();
@@ -487,16 +520,26 @@ export function createApp(cfg, deps = {}) {
     const used = [...new Set(doc.steps.flatMap((s) => s.screenshotIds))];
     const screenshots = used.map((id) => ({ id, path: resolve(id) })).filter((x) => x.path);
     doc.steps.forEach((s) => { s.screenshotIds = s.screenshotIds.filter((id) => resolve(id)); });
+    // Other languages: translated by Claude; a failed translation never blocks publishing.
+    const translations = []; const translationErrors = [];
+    if (aiAvailable(cfg)) {
+      for (const language of otherLanguages(cfg, doc.info.language || 'en')) {
+        try {
+          const t = await translate({ cfg, doc, to: language });
+          translations.push({ language, doc: t, docx: await renderDocx(t, resolve), markdown: renderMarkdown(t) });
+        } catch (e) { translationErrors.push({ language, error: e.message }); audit.write(req.user, 'draft.translation_failed', { draftId: d.id, language, error: e.message }); }
+      }
+    }
     let result;
     try {
-      result = await repo.publish({ doc, docx: await renderDocx(doc, resolve), markdown: renderMarkdown(doc), screenshots, expectedEtag: d.baseRef ? d.baseRef.etag : null, publishedBy: req.user, owners: [] });
+      result = await repo.publish({ doc, docx: await renderDocx(doc, resolve), markdown: renderMarkdown(doc), screenshots, expectedEtag: d.baseRef ? d.baseRef.etag : null, publishedBy: req.user, owners: [], translations });
     } catch (e) {
       d.lastPublishError = { at: Date.now(), message: e.message, code: e.code || null };
       store.put('drafts', d);
       audit.write(req.user, 'draft.publish_failed', { draftId: d.id, error: e.message, code: e.code });
       throw httpError(e.status && e.status < 600 ? (e.status === 412 ? 409 : e.status >= 500 ? 502 : e.status) : 502, `Publishing failed: ${e.message}`, e.code);
     } finally { fs.rmSync(path.join(cfg.dataDir, 'tmp', d.id), { recursive: true, force: true }); }
-    d.status = 'published'; d.published = { ...result, at: Date.now(), by: req.user.name }; d.publishedDoc = doc; d.updatedAt = Date.now(); delete d.lastPublishError;
+    d.status = 'published'; d.published = { ...result, translationErrors, at: Date.now(), by: req.user.name }; d.publishedDoc = doc; d.updatedAt = Date.now(); delete d.lastPublishError;
     d.history.push({ ts: Date.now(), user: req.user.name, action: 'published', version: result.version });
     store.put('drafts', d);
     if (cfg.retention.purgeRawAfterPublish) store.purgeRawCapture(d.sessionId, new Set(used));
@@ -517,6 +560,7 @@ export function createApp(cfg, deps = {}) {
 
   app.get('/api/drafts/:id/screenshots/:shot', wrap(async (req, res) => {
     const d = loadDraft(req);
+    await shotReady(d.sessionId, req.params.shot);
     const p = store.screenshotPath(d.sessionId, req.params.shot);
     if (p) return res.sendFile(p);
     const got = d.baseRef ? await repo.screenshot(d.baseRef.processId, req.params.shot) : null;

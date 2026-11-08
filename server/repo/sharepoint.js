@@ -4,6 +4,7 @@
 //   <rootFolder>/<category>/<processId>/
 //       <processId> - <title>.docx   <- the official document; SharePoint keeps every published version
 //       process.json                  <- machine-readable source used for comparisons on update
+//       <processId> - <title> (DE).docx, process.de.json, translations.json  <- other languages
 //       screenshots/<id>.jpg
 // Metadata columns on the .docx list item (created by ensureSchema): PDA_ProcessId, PDA_Version,
 // PDA_Status, PDA_Owner, PDA_Department, PDA_Category, PDA_Approver.
@@ -118,14 +119,30 @@ export class SharePointRepository {
     }
   }
 
-  async get(processId) {
+  async #readJson(driveId, parentId, name) {
+    try {
+      const it = await this.graph.get(`/drives/${driveId}/items/${parentId}:/${name}`);
+      return { item: it, data: JSON.parse((await this.graph.get(`/drives/${driveId}/items/${it.id}/content`, { raw: true })).toString('utf8')) };
+    } catch (e) { if (e.status === 404) return null; throw e; }
+  }
+
+  // language: return the published translation in that language instead (null if there is none).
+  async get(processId, { language } = {}) {
     const item = await this.#findItem(processId);
     if (!item) return null;
     const { driveId } = await this.#resolve();
     const jsonItem = await this.graph.get(`/drives/${driveId}/items/${item.parentId}:/process.json`);
     const doc = JSON.parse((await this.graph.get(`/drives/${driveId}/items/${jsonItem.id}/content`, { raw: true })).toString('utf8'));
     const versions = await this.graph.get(`/drives/${driveId}/items/${item.itemId}/versions?$select=id,lastModifiedDateTime,lastModifiedBy`);
-    return { doc, etag: jsonItem.eTag, webUrl: item.webUrl, versions: versions.value.map((v) => ({ version: v.id, publishedAt: v.lastModifiedDateTime, publishedBy: v.lastModifiedBy?.user?.displayName })) };
+    const tr = await this.#readJson(driveId, item.parentId, 'translations.json').catch(() => null);
+    const translations = Object.entries(tr?.data || {}).map(([lang, t]) => ({ language: lang, title: t.title, webUrl: t.webUrl }));
+    const base = { etag: jsonItem.eTag, webUrl: item.webUrl, versions: versions.value.map((v) => ({ version: v.id, publishedAt: v.lastModifiedDateTime, publishedBy: v.lastModifiedBy?.user?.displayName })), translations };
+    if (language && language !== (doc.info.language || 'en')) {
+      if (!/^[a-z]{2}$/.test(language)) return null;
+      const t = await this.#readJson(driveId, item.parentId, `process.${language}.json`);
+      return t ? { ...base, doc: t.data, webUrl: translations.find((x) => x.language === language)?.webUrl } : null;
+    }
+    return { ...base, doc };
   }
 
   async screenshot(processId, shotId) {
@@ -151,7 +168,7 @@ export class SharePointRepository {
     return res.json();
   }
 
-  async publish({ doc, docx, screenshots, expectedEtag, owners = [] }) {
+  async publish({ doc, docx, screenshots, expectedEtag, owners = [], translations = [] }) {
     const { driveId } = await this.#resolve();
     const existing = await this.#findItem(doc.info.processId);
     if (existing && expectedEtag === null) throw Object.assign(new Error(`Process ${doc.info.processId} already exists in SharePoint`), { status: 409, code: 'DUPLICATE' });
@@ -191,7 +208,27 @@ export class SharePointRepository {
     if (this.sp.assignOwnerPermissions && owners.length) {
       await this.graph.post(`/drives/${driveId}/items/${docItem.id}/invite`, { recipients: owners.map((email) => ({ email })), roles: ['write'], requireSignIn: true, sendInvitation: false });
     }
+    // 5. Translations: "<id> - <translated title> (DE).docx" next to the original, without a process id
+    //    so the library lists each process once; renamed in place to keep its version history.
+    const published = [];
+    if (translations.length) {
+      const prev = existing ? (await this.#readJson(driveId, existing.parentId, 'translations.json'))?.data || {} : {};
+      const index = {};
+      for (const t of translations) {
+        const name = `${safe(doc.info.processId)} - ${safe(t.doc.info.title)} (${t.language.toUpperCase()}).docx`;
+        const old = prev[t.language]?.fileName;
+        if (old && old !== name) {
+          try { const it = await this.graph.get(`/drives/${driveId}/root:/${enc(`${folderPath}/${old}`)}`); await this.graph.patch(`/drives/${driveId}/items/${it.id}`, { name }); } catch (e) { if (e.status !== 404) throw e; }
+        }
+        await this.#upload(driveId, folderPath, `process.${t.language}.json`, Buffer.from(JSON.stringify(t.doc, null, 2)));
+        const it = await this.#upload(driveId, folderPath, name, t.docx);
+        if (this.sp.applyMetadata) await this.graph.patch(`/drives/${driveId}/items/${it.id}/listItem/fields`, { Title: t.doc.info.title, PDA_Version: doc.info.version, PDA_Status: doc.info.status, PDA_Category: doc.info.category });
+        index[t.language] = { fileName: name, title: t.doc.info.title, webUrl: it.webUrl };
+        published.push({ language: t.language, webUrl: it.webUrl });
+      }
+      await this.#upload(driveId, folderPath, 'translations.json', Buffer.from(JSON.stringify(index, null, 2)));
+    }
     const jsonItem = await this.graph.get(`/drives/${driveId}/root:/${enc(`${folderPath}/process.json`)}`);
-    return { processId: doc.info.processId, version: doc.info.version, etag: jsonItem.eTag, webUrl: docItem.webUrl, location: folderPath };
+    return { processId: doc.info.processId, version: doc.info.version, etag: jsonItem.eTag, webUrl: docItem.webUrl, location: folderPath, translations: published };
   }
 }

@@ -20,12 +20,12 @@ Read access to **published** documents is governed by SharePoint permissions on 
 | Always visible | Red recording banner + timer in the app, `● REC` in the tab title, `REC` badge on the extension icon, always-on-top indicator from the desktop agent. |
 | Pause / stop | Pause and Stop in the app; the server drops events while paused (even from an outdated client), and Stop revokes the capture token. |
 | No passwords / tokens / secrets | Password fields, `autocomplete=cc-*`/`one-time-code` fields and configurable sensitive labels are never read. Typed text is not captured by default (only "a value was entered"). URLs lose sensitive query parameters (`code`, `token`, `sig`, …). Free text is scanned for JWTs, bearer tokens, API keys, connection-string keys, private keys, card numbers (Luhn) and IBANs. Redaction runs on the client **and** the server. |
-| Mask personal data | E-mail addresses are masked (`j***@contoso.com`). Sensitive fields are blurred in screenshots before capture. |
+| Mask personal data | E-mail addresses are masked in events (`j***@contoso.com`). Sensitive fields are blurred in screenshots before capture. The browser add-in covers e-mail addresses and international phone numbers on the page before each screenshot. With AI configured, every screenshot (add-in, desktop agent, screen sharing) is checked by Claude for names, e-mail addresses, phone numbers, addresses, personal IDs, profile photos and clear-text secrets, and those areas are pixelated in the stored file before anyone can view it or it is used for a description, draft or publication (`capture.blurPersonalData`, on by default; Admin page). |
 | Exclusions | Admin-configurable excluded applications and URL patterns (password managers, mail, banking by default). Excluded events are dropped client-side and server-side. |
 | No indefinite storage | Raw events and unused screenshots are deleted at publish time and, in any case, after `retention.rawCaptureDays` (default 14). Abandoned recordings are stopped automatically. In Azure, add a Blob lifecycle rule as a second line of defence. |
 | Verified by test | The end-to-end test types a password during a recording and asserts it is not present in any stored file. |
 
-Known limitation: screenshots can still contain personal data that is visible on screen (names in a user list, for example). Reviewers can remove screenshots before approval. OCR-based masking (Azure AI Vision + PII detection) is a possible Phase 5 addition.
+Known limitation: AI detection is best effort. It can miss an area (or blur too much), and without an AI key only the add-in's e-mail/phone covering applies. Reviewers still check screenshots and can remove them before approval. Personal data in element names of recorded events (for example a clicked row "John Doe") stays in the event log until retention deletes it; documents refer to such values generically.
 
 ## GDPR and employee-monitoring considerations
 
@@ -33,7 +33,7 @@ The tool records an employee's activity, so before roll-out: complete a DPIA, in
 
 ## Data sent to the AI model
 
-Only redacted events and screenshots of the recording are sent. Use the Anthropic API under your organisation's commercial terms or Claude on Microsoft Foundry to keep processing under an existing Microsoft agreement. Set `PDA_AI_PROVIDER=rules` to disable AI entirely.
+Only redacted events and screenshots of the recording are sent; screenshots are sent first for the personal-data check and afterwards only in their blurred form. Published documents are sent once more for the translation into the other language. Use the Anthropic API under your organisation's commercial terms or Claude on Microsoft Foundry to keep processing under an existing Microsoft agreement. Set `PDA_AI_PROVIDER=rules` to disable AI entirely.
 
 ## Other controls
 

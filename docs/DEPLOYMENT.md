@@ -14,7 +14,7 @@ npm start              # http://localhost:3000
 - Repository mode `local`: published documents go to `data/repository/` (the UI says so).
 - Documentation engine: rule-based unless `ANTHROPIC_API_KEY` is set, then Claude (`claude-opus-5-5`).
 
-**Load the browser extension:** Edge `edge://extensions` or Chrome `chrome://extensions` → Developer mode → *Load unpacked* → select `extension/`. Start a recording in the web app; the extension pairs automatically and its icon shows `REC`.
+**Load the browser extension:** Edge `edge://extensions` or Chrome `chrome://extensions` → Developer mode → *Load unpacked* → select `extension/`. Start a recording in the web app; the extension pairs automatically and its icon shows `REC`. **Guided mode:** open a process in the library and click *Guide me through this process*; the add-in shows the steps on the real pages and highlights what to click.
 
 **Desktop agent (Windows):**
 ```powershell

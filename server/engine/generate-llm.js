@@ -13,7 +13,7 @@ import { DocSchema, normalizeDoc } from './schema.js';
 import { SYSTEM_PROMPT, buildUserPrompt } from './prompts.js';
 import { generateWithRules } from './generate-rules.js';
 
-const LlmStep = DocSchema.shape.steps.element.omit({ id: true, number: true });
+const LlmStep = DocSchema.shape.steps.element.omit({ id: true, number: true, targets: true });
 const LlmOutput = z.object({
   doc: DocSchema.omit({ info: true, changeHistory: true, steps: true }).extend({ steps: z.array(LlmStep) }),
   clarifications: z.array(z.object({ section: z.string(), stepNumber: z.number().int().nullable(), question: z.string() })),
@@ -98,7 +98,7 @@ export function finalize({ out, skeleton, events, screenshots, base, meta, user,
 
   const doc = { ...skeleton.doc, ...out.doc, info: skeleton.doc.info, changeHistory: skeleton.doc.changeHistory };
   doc.steps = out.doc.steps.map((s, i) => {
-    const step = { ...s, id: `stp_${crypto.randomBytes(4).toString('hex')}`, number: i + 1 };
+    const step = { ...s, targets: [], id: `stp_${crypto.randomBytes(4).toString('hex')}`, number: i + 1 };
     step.evidenceEventSeqs = (s.evidenceEventSeqs || []).filter((n) => validSeqs.has(n));
     step.screenshotIds = (s.screenshotIds || []).filter((id) => validShots.has(id));
     if (!step.evidenceEventSeqs.length) {

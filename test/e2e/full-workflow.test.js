@@ -191,6 +191,33 @@ test('update process: record changed procedure, compare, decide per change, publ
   await portal.close(); await app.close();
 });
 
+test('guided mode: the add-in walks a colleague through the published procedure', async () => {
+  const pid = (await apiGet('/api/processes'))[0].processId;
+  const proc = await apiGet(`/api/processes/${pid}`);
+  const steps = proc.doc.steps.filter((s) => s.targets.length);
+  assert.ok(steps.length >= 2, `published steps carry what to click (got ${JSON.stringify(proc.doc.steps.map((s) => s.targets))})`);
+  const app = await ctx.newPage();
+  await app.goto(`${appUrl}/#/library/${pid}`);
+  await app.getByTestId('guide-start').click();
+  await app.getByText('Started.').waitFor();
+  const portal = await ctx.newPage();
+  await portal.goto(`${portalUrl}#/users`);
+  const panel = portal.locator('div[role=dialog][aria-label="Guided procedure"]');
+  await panel.waitFor({ timeout: 10000 });
+  const first = proc.doc.steps[0].targets[0];
+  assert.match(await panel.innerText(), /Step 1 of/);
+  assert.match(await panel.innerText(), new RegExp(`(Click|Fill in|Choose in)\\s+${first.name}`));
+  await snap(portal, '08-guided-mode');
+  const before = await panel.innerText();
+  const el = ['textbox', 'searchbox', 'combobox', 'checkbox'].includes(first.role) ? portal.getByLabel(first.name).first() : portal.getByRole(first.role, { name: first.name }).first();
+  await el.click();
+  for (let i = 0; i < 30 && (await panel.innerText()) === before; i++) await sleep(100);
+  assert.notEqual(await panel.innerText(), before, 'clicking the highlighted element moves the guide on');
+  await panel.getByRole('button', { name: 'End guide' }).click();
+  await panel.waitFor({ state: 'detached', timeout: 5000 });
+  await portal.close(); await app.close();
+});
+
 test('the password typed during recording never reached storage', () => {
   const hits = [];
   const walk = (dir) => { for (const f of fs.readdirSync(dir)) { const p = path.join(dir, f); if (fs.statSync(p).isDirectory()) walk(p); else if (fs.readFileSync(p).includes(SECRET)) hits.push(p); } };

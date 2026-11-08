@@ -17,6 +17,7 @@
     "model": "claude-haiku-5-5",
     "effort": "low",
     "describeSteps": true,
+    "languages": ["en", "de"],
     "maxScreenshotsToModel": 20,
     "foundry": { "resource": "" }
   },
@@ -46,6 +47,7 @@
   ],
   "capture": {
     "captureFreeTextValues": false,
+    "blurPersonalData": true,
     "screenshotOnClick": true,
     "maxScreenshotsPerSession": 300,
     "excludedApps": ["keepass", "1password", "bitwarden", "lastpass", "credential manager", "outlook", "teams"],

@@ -8,11 +8,11 @@ const SYSTEM = `You document IT administration procedures. You are given one ste
 Write the instruction for this step in 1 to 3 short imperative sentences, as it should appear in a work instruction (for example: "In the Microsoft 365 admin center, open Users > Active users and select the user.").
 Rules: describe only what the screenshot and the recognised actions show; never invent names, values or settings that are not visible; never repeat passwords, secrets or personal data; if the screenshot does not make the action clear, describe which screen or page is open. Answer with the instruction text only.`;
 
-export async function describeStepWithClaude({ cfg, step, screenshot, client }) {
+export async function describeStepWithClaude({ cfg, step, screenshot, client, language }) {
   const content = [];
   if (screenshot) content.push({ type: 'image', source: { type: 'base64', media_type: screenshot.mime, data: fs.readFileSync(screenshot.path).toString('base64') } });
   const recognised = [...(step.instructions || []), step.expectedResult].filter(Boolean);
-  content.push({ type: 'text', text: `Step ${step.number}: ${step.title}\nRecognised actions:\n${recognised.length ? recognised.map((l) => `- ${l}`).join('\n') : '(none - screen sharing only)'}` });
+  content.push({ type: 'text', text: `Write the instruction in ${language === 'de' ? 'German' : 'English'}.\nStep ${step.number}: ${step.title}\nRecognised actions:\n${recognised.length ? recognised.map((l) => `- ${l}`).join('\n') : '(none - screen sharing only)'}` });
 
   const anthropic = client || (await createClient(cfg));
   const msg = await anthropic.messages.create({

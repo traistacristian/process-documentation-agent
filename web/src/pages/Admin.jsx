@@ -11,7 +11,7 @@ export default function Admin() {
   const load = async () => {
     try {
       const x = await api('/api/admin/settings'); setS(x);
-      setF({ categories: lines(x.categories), excludedApps: lines(x.capture.excludedApps), excludedUrlPatterns: lines(x.capture.excludedUrlPatterns), sensitiveFieldPatterns: lines(x.capture.sensitiveFieldPatterns), captureFreeTextValues: x.capture.captureFreeTextValues, screenshotOnClick: x.capture.screenshotOnClick, rawCaptureDays: x.retention.rawCaptureDays, purgeRawAfterPublish: x.retention.purgeRawAfterPublish, webhookUrl: x.notifications.webhookUrl || '' });
+      setF({ categories: lines(x.categories), excludedApps: lines(x.capture.excludedApps), excludedUrlPatterns: lines(x.capture.excludedUrlPatterns), sensitiveFieldPatterns: lines(x.capture.sensitiveFieldPatterns), captureFreeTextValues: x.capture.captureFreeTextValues, screenshotOnClick: x.capture.screenshotOnClick, blurPersonalData: x.capture.blurPersonalData !== false, rawCaptureDays: x.retention.rawCaptureDays, purgeRawAfterPublish: x.retention.purgeRawAfterPublish, webhookUrl: x.notifications.webhookUrl || '' });
       setRepo(await api('/api/repository/status')); setAudit(await api('/api/admin/audit?limit=100'));
     } catch (e) { setErr(e.message); }
   };
@@ -21,7 +21,7 @@ export default function Admin() {
   const save = async () => {
     setErr(null); setMsg(null);
     try {
-      await api('/api/admin/settings', { method: 'PUT', body: { categories: parse(f.categories), capture: { excludedApps: parse(f.excludedApps), excludedUrlPatterns: parse(f.excludedUrlPatterns), sensitiveFieldPatterns: parse(f.sensitiveFieldPatterns), captureFreeTextValues: f.captureFreeTextValues, screenshotOnClick: f.screenshotOnClick }, retention: { rawCaptureDays: Number(f.rawCaptureDays), purgeRawAfterPublish: f.purgeRawAfterPublish }, notifications: { webhookUrl: f.webhookUrl.trim() } } });
+      await api('/api/admin/settings', { method: 'PUT', body: { categories: parse(f.categories), capture: { excludedApps: parse(f.excludedApps), excludedUrlPatterns: parse(f.excludedUrlPatterns), sensitiveFieldPatterns: parse(f.sensitiveFieldPatterns), captureFreeTextValues: f.captureFreeTextValues, screenshotOnClick: f.screenshotOnClick, blurPersonalData: f.blurPersonalData }, retention: { rawCaptureDays: Number(f.rawCaptureDays), purgeRawAfterPublish: f.purgeRawAfterPublish }, notifications: { webhookUrl: f.webhookUrl.trim() } } });
       setMsg('Settings saved. New categories are available right away; capture clients pick up policy changes when they next pair.'); load(); refreshConfig();
     } catch (e) { setErr(e.message); }
   };
@@ -51,6 +51,7 @@ export default function Admin() {
           <label className="f">Sensitive field names <span className="opt">(values in these fields are never captured, and fields are blurred in screenshots)</span><textarea value={f.sensitiveFieldPatterns} onChange={set('sensitiveFieldPatterns')} /></label>
           <label className="row"><input type="checkbox" style={{ width: 'auto' }} checked={f.captureFreeTextValues} onChange={set('captureFreeTextValues')} /> Capture typed text in non-sensitive fields (off by default – check your works council / DPO requirements)</label>
           <label className="row"><input type="checkbox" style={{ width: 'auto' }} checked={f.screenshotOnClick} onChange={set('screenshotOnClick')} /> Take a screenshot on each click</label>
+          <label className="row"><input type="checkbox" style={{ width: 'auto' }} checked={f.blurPersonalData} onChange={set('blurPersonalData')} data-testid="blur-personal-data" /> Blur personal data in screenshots (names, e-mail addresses, phone numbers; uses Claude, needs the AI to be configured)</label>
         </div>
         <div className="panel">
           <h2>Retention and notifications</h2>

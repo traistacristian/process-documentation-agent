@@ -1,49 +1,71 @@
 // Renders the standard document model to Word (.docx, the format published to SharePoint) and to
 // Markdown (used for previews and the plain-text copy kept next to the Word file).
+// Fixed texts follow the document language (English or German).
 import fs from 'node:fs';
 import { Document, Packer, Paragraph, HeadingLevel, TextRun, Table, TableRow, TableCell, WidthType, ImageRun, AlignmentType, BorderStyle } from 'docx';
 
-const SECTIONS = ['Process Information', 'Purpose', 'Scope', 'Prerequisites', 'Roles and Responsibilities', 'Process Execution – Step by Step', 'Decision Points and Exceptions', 'Expected Outcome', 'Troubleshooting', 'Related Documentation', 'Change History'];
-const TBD = 'To be confirmed.';
+const LABELS = {
+  en: {
+    sections: ['Process Information', 'Purpose', 'Scope', 'Prerequisites', 'Roles and Responsibilities', 'Process Execution – Step by Step', 'Decision Points and Exceptions', 'Expected Outcome', 'Troubleshooting', 'Related Documentation', 'Change History'],
+    tbd: 'To be confirmed.', field: 'Field', value: 'Value', included: 'Included', excluded: 'Excluded',
+    prereq: { permissions: 'Required permissions', access: 'Required access', systems: 'Applications and systems', information: 'Required information', dependencies: 'Dependencies' },
+    info: ['Process title', 'Process ID', 'Version', 'Creation date', 'Last updated', 'Process owner', 'Responsible department', 'Category', 'Author', 'Reviewer / approver', 'Status'],
+    step: 'Step', app: 'Application / system', input: 'Required input', result: 'Expected result', screenshot: 'Screenshot', note: 'Note', warning: 'Warning',
+    figure: 'Figure', notAvailable: 'not available', noDecisions: 'No decision points recorded.', ifThen: (c, a) => `If ${c}, then ${a}`, stepRef: (n) => `step ${n}`,
+    exc: ['Problem', 'Handling / recovery', 'Escalation'], noIssues: 'No known issues recorded.', issue: ['Issue', 'Resolution'], none: 'None.',
+    role: ['Role', 'Responsibilities'], history: ['Version', 'Date', 'Author', 'Approver', 'Summary'], subtitle: 'IT Process Documentation',
+  },
+  de: {
+    sections: ['Prozessinformationen', 'Zweck', 'Geltungsbereich', 'Voraussetzungen', 'Rollen und Verantwortlichkeiten', 'Prozessablauf – Schritt für Schritt', 'Entscheidungspunkte und Ausnahmen', 'Erwartetes Ergebnis', 'Fehlerbehebung', 'Zugehörige Dokumentation', 'Änderungshistorie'],
+    tbd: 'Noch zu bestätigen.', field: 'Feld', value: 'Wert', included: 'Enthalten', excluded: 'Nicht enthalten',
+    prereq: { permissions: 'Erforderliche Berechtigungen', access: 'Erforderliche Zugänge', systems: 'Anwendungen und Systeme', information: 'Erforderliche Informationen', dependencies: 'Abhängigkeiten' },
+    info: ['Prozesstitel', 'Prozess-ID', 'Version', 'Erstellt am', 'Zuletzt aktualisiert', 'Prozessverantwortlich', 'Zuständige Abteilung', 'Kategorie', 'Autor', 'Prüfer / Freigabe', 'Status'],
+    step: 'Schritt', app: 'Anwendung / System', input: 'Erforderliche Eingabe', result: 'Erwartetes Ergebnis', screenshot: 'Screenshot', note: 'Hinweis', warning: 'Warnung',
+    figure: 'Abbildung', notAvailable: 'nicht verfügbar', noDecisions: 'Keine Entscheidungspunkte erfasst.', ifThen: (c, a) => `Wenn ${c}, dann ${a}`, stepRef: (n) => `Schritt ${n}`,
+    exc: ['Problem', 'Behandlung / Wiederherstellung', 'Eskalation'], noIssues: 'Keine bekannten Probleme erfasst.', issue: ['Problem', 'Lösung'], none: 'Keine.',
+    role: ['Rolle', 'Verantwortlichkeiten'], history: ['Version', 'Datum', 'Autor', 'Freigabe', 'Zusammenfassung'], subtitle: 'IT-Prozessdokumentation',
+  },
+};
+export const labelsFor = (d) => LABELS[d?.info?.language] || LABELS.en;
 
-const infoRows = (d) => [
-  ['Process title', d.info.title], ['Process ID', d.info.processId], ['Version', d.info.version],
-  ['Creation date', d.info.createdAt?.slice(0, 10)], ['Last updated', d.info.updatedAt?.slice(0, 10)],
-  ['Process owner', d.info.owner], ['Responsible department', d.info.department], ['Category', d.info.category],
-  ['Author', d.info.author], ['Reviewer / approver', d.info.approver], ['Status', d.info.status],
-];
+const infoRows = (d, L) => [
+  d.info.title, d.info.processId, d.info.version, d.info.createdAt?.slice(0, 10), d.info.updatedAt?.slice(0, 10),
+  d.info.owner, d.info.department, d.info.category, d.info.author, d.info.approver, d.info.status,
+].map((v, i) => [L.info[i], v]);
 
 export function renderMarkdown(d) {
+  const T = labelsFor(d); const SECTIONS = T.sections; const TBD = T.tbd;
   const L = [];
   const list = (arr) => (arr?.length ? arr.map((x) => `- ${x}`).join('\n') : `_${TBD}_`);
   L.push(`# ${d.info.title}`, '');
-  L.push(`## 1. ${SECTIONS[0]}`, '', '| Field | Value |', '|---|---|', ...infoRows(d).map(([k, v]) => `| ${k} | ${v || '–'} |`), '');
+  L.push(`## 1. ${SECTIONS[0]}`, '', `| ${T.field} | ${T.value} |`, '|---|---|', ...infoRows(d, T).map(([k, v]) => `| ${k} | ${v || '–'} |`), '');
   L.push(`## 2. ${SECTIONS[1]}`, '', d.purpose || `_${TBD}_`, '');
-  L.push(`## 3. ${SECTIONS[2]}`, '', '**Included**', '', list(d.scope.included), '', '**Excluded**', '', list(d.scope.excluded), '');
+  L.push(`## 3. ${SECTIONS[2]}`, '', `**${T.included}**`, '', list(d.scope.included), '', `**${T.excluded}**`, '', list(d.scope.excluded), '');
   L.push(`## 4. ${SECTIONS[3]}`, '');
-  for (const [k, label] of [['permissions', 'Required permissions'], ['access', 'Required access'], ['systems', 'Applications and systems'], ['information', 'Required information'], ['dependencies', 'Dependencies']]) L.push(`**${label}**`, '', list(d.prerequisites[k]), '');
+  for (const [k, label] of Object.entries(T.prereq)) L.push(`**${label}**`, '', list(d.prerequisites[k]), '');
   L.push(`## 5. ${SECTIONS[4]}`, '', d.roles.length ? d.roles.map((r) => `- **${r.role}**: ${r.responsibilities}`).join('\n') : `_${TBD}_`, '');
   L.push(`## 6. ${SECTIONS[5]}`, '');
   for (const s of d.steps) {
-    L.push(`### Step ${s.number} – ${s.title}`, '');
+    L.push(`### ${T.step} ${s.number} – ${s.title}`, '');
     if (s.description) L.push(s.description, '');
     s.instructions.forEach((x, i) => L.push(`${i + 1}. ${x}`));
-    L.push('', `- **Application / system:** ${s.application || '–'}`, `- **Required input:** ${s.input || '–'}`, `- **Expected result:** ${s.expectedResult || TBD}`);
-    for (const id of s.screenshotIds) L.push(`- **Screenshot:** ![Step ${s.number}](screenshots/${id}.jpg)`);
-    for (const n of s.notes) L.push(`- **Note:** ${n}`);
-    for (const w of s.warnings) L.push(`- **Warning:** ${w}`);
+    L.push('', `- **${T.app}:** ${s.application || '–'}`, `- **${T.input}:** ${s.input || '–'}`, `- **${T.result}:** ${s.expectedResult || TBD}`);
+    for (const id of s.screenshotIds) L.push(`- **${T.screenshot}:** ![${T.step} ${s.number}](screenshots/${id}.jpg)`);
+    for (const n of s.notes) L.push(`- **${T.note}:** ${n}`);
+    for (const w of s.warnings) L.push(`- **${T.warning}:** ${w}`);
     L.push('');
   }
   L.push(`## 7. ${SECTIONS[6]}`, '');
-  L.push(d.decisions.length ? d.decisions.map((x) => `- **If** ${x.condition} **then** ${x.action}${x.stepNumber ? ` (step ${x.stepNumber})` : ''}`).join('\n') : `_No decision points recorded._`, '');
-  if (d.exceptions.length) L.push('| Problem | Handling | Escalation |', '|---|---|---|', ...d.exceptions.map((e) => `| ${e.problem} | ${e.handling || TBD} | ${e.escalation || TBD} |`), '');
+  L.push(d.decisions.length ? d.decisions.map((x) => `- ${T.ifThen(x.condition, x.action)}${x.stepNumber ? ` (${T.stepRef(x.stepNumber)})` : ''}`).join('\n') : `_${T.noDecisions}_`, '');
+  if (d.exceptions.length) L.push(`| ${T.exc.join(' | ')} |`, '|---|---|---|', ...d.exceptions.map((e) => `| ${e.problem} | ${e.handling || TBD} | ${e.escalation || TBD} |`), '');
   L.push(`## 8. ${SECTIONS[7]}`, '', d.expectedOutcome || `_${TBD}_`, '', list(d.verification), '');
-  L.push(`## 9. ${SECTIONS[8]}`, '', d.troubleshooting.length ? d.troubleshooting.map((t) => `- **${t.issue}**: ${t.resolution}`).join('\n') : '_No known issues recorded._', '');
-  L.push(`## 10. ${SECTIONS[9]}`, '', d.related.length ? d.related.map((r) => `- [${r.title}](${r.url})`).join('\n') : '_None._', '');
-  L.push(`## 11. ${SECTIONS[10]}`, '', '| Version | Date | Author | Approver | Summary |', '|---|---|---|---|---|', ...d.changeHistory.map((c) => `| ${c.version} | ${c.date?.slice(0, 10)} | ${c.author} | ${c.approver} | ${c.summary} |`), '');
+  L.push(`## 9. ${SECTIONS[8]}`, '', d.troubleshooting.length ? d.troubleshooting.map((t) => `- **${t.issue}**: ${t.resolution}`).join('\n') : `_${T.noIssues}_`, '');
+  L.push(`## 10. ${SECTIONS[9]}`, '', d.related.length ? d.related.map((r) => `- [${r.title}](${r.url})`).join('\n') : `_${T.none}_`, '');
+  L.push(`## 11. ${SECTIONS[10]}`, '', `| ${T.history.join(' | ')} |`, '|---|---|---|---|---|', ...d.changeHistory.map((c) => `| ${c.version} | ${c.date?.slice(0, 10)} | ${c.author} | ${c.approver} | ${c.summary} |`), '');
   return L.join('\n');
 }
 
+let TBD = LABELS.en.tbd;
 const H = (text, level = HeadingLevel.HEADING_1) => new Paragraph({ text, heading: level, spacing: { before: 240, after: 120 } });
 const P = (text, opts = {}) => new Paragraph({ children: [new TextRun({ text: text || '', italics: !text || opts.italics, bold: opts.bold })], spacing: { after: 80 } });
 const bullets = (arr) => (arr?.length ? arr.map((x) => new Paragraph({ text: x, bullet: { level: 0 } })) : [P(TBD, { italics: true })]);
@@ -70,40 +92,41 @@ function imageSize(buf) {
 
 // resolveShot(id) -> absolute path of the screenshot file or null
 export async function renderDocx(d, resolveShot = () => null) {
+  const T = labelsFor(d); const SECTIONS = T.sections; TBD = T.tbd;
   const children = [
     new Paragraph({ children: [new TextRun({ text: d.info.title, bold: true, size: 40, color: '1F3A5F' })], spacing: { after: 120 } }),
-    new Paragraph({ children: [new TextRun({ text: `IT Process Documentation · ${d.info.processId} · Version ${d.info.version} · ${d.info.status}`, color: '5B6B80', size: 20 })], spacing: { after: 240 } }),
-    H(`1. ${SECTIONS[0]}`), table(infoRows(d).map(([k, v]) => [k, v || '–'])),
+    new Paragraph({ children: [new TextRun({ text: `${T.subtitle} · ${d.info.processId} · Version ${d.info.version} · ${d.info.status}`, color: '5B6B80', size: 20 })], spacing: { after: 240 } }),
+    H(`1. ${SECTIONS[0]}`), table(infoRows(d, T).map(([k, v]) => [k, v || '–'])),
     H(`2. ${SECTIONS[1]}`), P(d.purpose || TBD, { italics: !d.purpose }),
-    H(`3. ${SECTIONS[2]}`), P('Included', { bold: true }), ...bullets(d.scope.included), P('Excluded', { bold: true }), ...bullets(d.scope.excluded),
+    H(`3. ${SECTIONS[2]}`), P(T.included, { bold: true }), ...bullets(d.scope.included), P(T.excluded, { bold: true }), ...bullets(d.scope.excluded),
     H(`4. ${SECTIONS[3]}`),
   ];
-  for (const [k, label] of [['permissions', 'Required permissions'], ['access', 'Required access'], ['systems', 'Applications and systems'], ['information', 'Required information'], ['dependencies', 'Dependencies']]) children.push(P(label, { bold: true }), ...bullets(d.prerequisites[k]));
-  children.push(H(`5. ${SECTIONS[4]}`), d.roles.length ? table(d.roles.map((r) => [r.role, r.responsibilities]), ['Role', 'Responsibilities']) : P(TBD, { italics: true }));
+  for (const [k, label] of Object.entries(T.prereq)) children.push(P(label, { bold: true }), ...bullets(d.prerequisites[k]));
+  children.push(H(`5. ${SECTIONS[4]}`), d.roles.length ? table(d.roles.map((r) => [r.role, r.responsibilities]), T.role) : P(TBD, { italics: true }));
   children.push(H(`6. ${SECTIONS[5]}`));
   for (const s of d.steps) {
-    children.push(H(`Step ${s.number} – ${s.title}`, HeadingLevel.HEADING_2));
+    children.push(H(`${T.step} ${s.number} – ${s.title}`, HeadingLevel.HEADING_2));
     if (s.description) children.push(P(s.description));
     s.instructions.forEach((x, i) => children.push(new Paragraph({ children: [new TextRun({ text: `${i + 1}. `, bold: true }), new TextRun(x)], indent: { left: 360 }, spacing: { after: 60 } })));
-    children.push(table([['Application / system', s.application || '–'], ['Required input', s.input || '–'], ['Expected result', s.expectedResult || TBD]]));
+    children.push(table([[T.app, s.application || '–'], [T.input, s.input || '–'], [T.result, s.expectedResult || TBD]]));
     for (const id of s.screenshotIds) {
       const p = resolveShot(id);
-      if (!p || !fs.existsSync(p)) { children.push(P(`[Screenshot ${id} not available]`, { italics: true })); continue; }
+      if (!p || !fs.existsSync(p)) { children.push(P(`[${T.screenshot} ${id} ${T.notAvailable}]`, { italics: true })); continue; }
       const buf = fs.readFileSync(p); const { w, h, type } = imageSize(buf);
       const width = Math.min(600, w); const height = Math.round((h / w) * width);
       children.push(new Paragraph({ children: [new ImageRun({ data: buf, type, transformation: { width, height } })], alignment: AlignmentType.CENTER, spacing: { before: 120, after: 60 } }));
-      children.push(new Paragraph({ children: [new TextRun({ text: `Figure: Step ${s.number} – ${s.title}`, italics: true, size: 18, color: '5B6B80' })], alignment: AlignmentType.CENTER }));
+      children.push(new Paragraph({ children: [new TextRun({ text: `${T.figure}: ${T.step} ${s.number} – ${s.title}`, italics: true, size: 18, color: '5B6B80' })], alignment: AlignmentType.CENTER }));
     }
-    for (const n of s.notes) children.push(P(`Note: ${n}`));
+    for (const n of s.notes) children.push(P(`${T.note}: ${n}`));
     for (const w of s.warnings) children.push(new Paragraph({ children: [new TextRun({ text: `⚠ ${w}`, color: '9A5B00' })] }));
   }
   children.push(H(`7. ${SECTIONS[6]}`));
-  children.push(...(d.decisions.length ? d.decisions.map((x) => new Paragraph({ text: `If ${x.condition}, then ${x.action}${x.stepNumber ? ` (step ${x.stepNumber})` : ''}.`, bullet: { level: 0 } })) : [P('No decision points recorded.', { italics: true })]));
-  if (d.exceptions.length) children.push(table(d.exceptions.map((e) => [e.problem, e.handling || TBD, e.escalation || TBD]), ['Problem', 'Handling / recovery', 'Escalation']));
+  children.push(...(d.decisions.length ? d.decisions.map((x) => new Paragraph({ text: `${T.ifThen(x.condition, x.action)}${x.stepNumber ? ` (${T.stepRef(x.stepNumber)})` : ''}.`, bullet: { level: 0 } })) : [P(T.noDecisions, { italics: true })]));
+  if (d.exceptions.length) children.push(table(d.exceptions.map((e) => [e.problem, e.handling || TBD, e.escalation || TBD]), T.exc));
   children.push(H(`8. ${SECTIONS[7]}`), P(d.expectedOutcome || TBD, { italics: !d.expectedOutcome }), ...(d.verification.length ? bullets(d.verification) : []));
-  children.push(H(`9. ${SECTIONS[8]}`), ...(d.troubleshooting.length ? [table(d.troubleshooting.map((t) => [t.issue, t.resolution]), ['Issue', 'Resolution'])] : [P('No known issues recorded.', { italics: true })]));
-  children.push(H(`10. ${SECTIONS[9]}`), ...(d.related.length ? d.related.map((r) => new Paragraph({ text: `${r.title}: ${r.url}`, bullet: { level: 0 } })) : [P('None.', { italics: true })]));
-  children.push(H(`11. ${SECTIONS[10]}`), table(d.changeHistory.map((c) => [c.version, c.date?.slice(0, 10), c.author, c.approver, c.summary]), ['Version', 'Date', 'Author', 'Approver', 'Summary']));
+  children.push(H(`9. ${SECTIONS[8]}`), ...(d.troubleshooting.length ? [table(d.troubleshooting.map((t) => [t.issue, t.resolution]), T.issue)] : [P(T.noIssues, { italics: true })]));
+  children.push(H(`10. ${SECTIONS[9]}`), ...(d.related.length ? d.related.map((r) => new Paragraph({ text: `${r.title}: ${r.url}`, bullet: { level: 0 } })) : [P(T.none, { italics: true })]));
+  children.push(H(`11. ${SECTIONS[10]}`), table(d.changeHistory.map((c) => [c.version, c.date?.slice(0, 10), c.author, c.approver, c.summary]), T.history));
 
   const doc = new Document({
     creator: 'Process Documentation Agent', title: d.info.title, description: `${d.info.processId} v${d.info.version}`,

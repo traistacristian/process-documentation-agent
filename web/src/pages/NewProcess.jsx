@@ -7,7 +7,7 @@ export default function NewProcess({ me }) {
   const [cfg, setCfg] = useState(getConfig());
   // Categories can be changed by an admin at any time: always show the current list.
   useEffect(() => { refreshConfig().then((c) => setCfg({ ...c })); }, []);
-  const [f, setF] = useState({ title: '', description: '', department: '', owner: '', category: '' });
+  const [f, setF] = useState({ title: '', description: '', department: '', owner: '', category: '', language: 'en' });
   const [consent, setConsent] = useState(false); const [dups, setDups] = useState([]); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
@@ -42,6 +42,10 @@ export default function NewProcess({ me }) {
           <select value={f.category} onChange={set('category')}><option value="">Choose…</option>{cfg.categories.map((c) => <option key={c}>{c}</option>)}</select>
         </label>
       </div>
+      <label className="f" style={{ maxWidth: 320 }}>Document language
+        <select value={f.language} onChange={set('language')} data-testid="language"><option value="en">English</option><option value="de">Deutsch (German)</option></select>
+        <span className="small muted">The AI writes the document in this language; on publishing, the other language is added as a translated copy.</span>
+      </label>
       <Consent checked={consent} onChange={setConsent} />
       <div className="row" style={{ marginTop: 16 }}>
         <button className="btn danger big" disabled={!f.title.trim() || !consent || busy} data-testid="start">● Start Recording</button>

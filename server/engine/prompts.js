@@ -14,13 +14,14 @@ How to work:
 7. Attach screenshots to the steps they illustrate using their ids; only use ids you were given, and only where the screenshot genuinely helps.
 8. Suggestions are optional recommendations to improve the process or the documentation (for example a missing verification step or an automation opportunity). Keep them separate from the documented steps.
 9. When an existing approved document is provided, this is an update. Reuse the existing wording, step titles and terminology for every step that was performed the same way, so that the comparison shows only real changes. Keep existing purpose, scope, roles, prerequisites and troubleshooting unless the new recording contradicts them; raise a clarification when it does.
-10. Write in clear British English unless the existing document uses another language.`;
+10. Write the whole document in the language named in <document_language> (British English or German). Keep the names of menus, buttons and fields exactly as captured, even when they are in another language.`;
 
 export function buildUserPrompt({ meta, candidateSteps, events, screenshots, base }) {
   const lines = [];
   lines.push('<process_information>');
   lines.push(JSON.stringify({ title: meta.title, description: meta.description || '', department: meta.department || '', owner: meta.owner || '', category: meta.category || '' }, null, 2));
   lines.push('</process_information>');
+  lines.push(`<document_language>${meta.language === 'de' ? 'German (Deutsch)' : 'British English'}</document_language>`);
   if (base) {
     lines.push('<existing_approved_document>');
     lines.push(JSON.stringify(base, null, 2));

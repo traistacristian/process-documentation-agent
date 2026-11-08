@@ -148,9 +148,37 @@ async function syncLoop() {
   } finally { syncing = false; }
 }
 
+// ---------------------------------------------------------------- guided mode
+// A published procedure handed over by the web app. Every tab shows the current step and
+// highlights what to click; the position is shared, so the guide continues across tabs and pages.
+const guideGet = async () => (await chrome.storage.local.get(['guide'])).guide || null;
+async function guideSet(g) {
+  await chrome.storage.local.set({ guide: g });
+  for (const tab of await chrome.tabs.query({})) chrome.tabs.sendMessage(tab.id, { type: 'guide', guide: g }).catch(() => {});
+}
+function validGuide(g) {
+  return g && typeof g.title === 'string' && Array.isArray(g.steps) && g.steps.length > 0 && g.steps.length <= 200
+    && g.steps.every((s) => typeof s.title === 'string' && Array.isArray(s.instructions) && Array.isArray(s.targets || []));
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   (async () => {
-    if (msg.type === 'hello') return contentState();
+    if (msg.type === 'hello') return { ...(await contentState()), guide: await guideGet() };
+    if (msg.type === 'guide-start') {
+      if (!validGuide(msg.guide)) return { ok: false, error: 'This process has no steps to guide through.' };
+      const { allowedServers } = await managed();
+      if (Array.isArray(allowedServers) && allowedServers.length && !allowedServers.map((a) => { try { return new URL(a).origin; } catch { return a; } }).includes(msg.appOrigin)) return { ok: false, error: `Your organisation only allows ${allowedServers.join(', ')}.` };
+      await guideSet({ ...msg.guide, appOrigin: msg.appOrigin, step: 0, target: 0, startedAt: Date.now() });
+      return { ok: true };
+    }
+    if (msg.type === 'guide-move') {
+      const g = await guideGet();
+      if (!g) return { ok: false };
+      if (msg.done) { await guideSet(null); return { ok: true }; }
+      const step = Math.max(0, Math.min(g.steps.length - 1, msg.step)); const target = Math.max(0, msg.target || 0);
+      await guideSet({ ...g, step, target, finished: !!msg.finished });
+      return { ok: true };
+    }
     if (msg.type === 'status') { const s = await get(); return { status: s.status, title: s.title, queued: s.queue.length, paired: !!s.token }; }
     if (msg.type === 'pair') return pair(String(msg.code || ''), msg.apiBase);
     if (msg.type === 'managed') return managed();

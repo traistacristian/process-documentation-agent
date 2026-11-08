@@ -198,11 +198,12 @@ test('with Claude configured, finished steps get an AI description that the auth
   const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'pda-ai-'));
   const c2 = loadConfig({ dataDir: d2, ai: { provider: 'anthropic' } });
   c2.repository.local.path = path.join(d2, 'repository');
-  const calls = [];
+  const calls = []; let protectedShots = 0;
   const { generateWithRules } = await import('../../server/engine/generate-rules.js');
   const a2 = createApp(c2, {
     describeStepWithClaude: async ({ step, screenshot }) => { calls.push({ step: step.number, hasShot: Boolean(screenshot) }); return `AI: step ${step.number}`; },
     generateWithClaude: (input) => generateWithRules(input),
+    protectScreenshot: async () => { protectedShots++; return { count: 1, kinds: ['name'] }; },
   });
   const s2 = http.createServer(a2); await new Promise((r) => s2.listen(0, '127.0.0.1', r));
   const b2 = `http://127.0.0.1:${s2.address().port}`;
@@ -226,6 +227,7 @@ test('with Claude configured, finished steps get an AI description that the auth
     steps = await c('GET', `/api/sessions/${s.id}/steps`);
     assert.equal(steps[1].suggested, 'AI: step 2', 'after stop the last step is described too');
     assert.equal(calls.length, 2, 'each step is described once');
+    assert.equal(protectedShots, 1, 'every screenshot is checked for personal data');
     await c('PUT', `/api/sessions/${s.id}/step-descriptions`, { seq: steps[1].firstSeq, text: 'Give the helpdesk role' });
     const gen = await c('POST', `/api/sessions/${s.id}/generate`, {});
     let d; for (let i = 0; i < 50; i++) { d = await c('GET', `/api/drafts/${gen.id}`); if (d.status !== 'generating') break; await new Promise((r) => setTimeout(r, 50)); }

@@ -19,12 +19,15 @@ export const StepSchema = z.object({
   warnings: strList,
   important: z.boolean(),
   evidenceEventSeqs: z.array(z.number().int()),
+  // What to click in this step (from the recording), used by guided mode to highlight it.
+  targets: z.array(z.object({ role: str, name: str, url: str })),
 });
 
 export const DocSchema = z.object({
   info: z.object({
     processId: str, title: str, version: str, createdAt: str, updatedAt: str,
     owner: str, department: str, category: str, author: str, approver: str, status: str,
+    language: z.enum(['en', 'de']),
   }),
   purpose: str,
   scope: z.object({ included: strList, excluded: strList }),
@@ -48,7 +51,7 @@ export const ClarificationSchema = z.object({
 export function emptyDoc(info = {}) {
   const now = new Date().toISOString();
   return {
-    info: { processId: '', title: '', version: '0.1', createdAt: now, updatedAt: now, owner: '', department: '', category: '', author: '', approver: '', status: 'Draft', ...info },
+    info: { processId: '', title: '', version: '0.1', createdAt: now, updatedAt: now, owner: '', department: '', category: '', author: '', approver: '', status: 'Draft', language: 'en', ...info },
     purpose: '', scope: { included: [], excluded: [] },
     prerequisites: { permissions: [], access: [], systems: [], information: [], dependencies: [] },
     roles: [], steps: [], decisions: [], exceptions: [], expectedOutcome: '', verification: [],
@@ -57,7 +60,7 @@ export function emptyDoc(info = {}) {
 }
 
 export function emptyStep(n) {
-  return { id: `step_${n}`, number: n, title: '', description: '', instructions: [], application: '', input: '', expectedResult: '', screenshotIds: [], notes: [], warnings: [], important: false, evidenceEventSeqs: [] };
+  return { id: `step_${n}`, number: n, title: '', description: '', instructions: [], application: '', input: '', expectedResult: '', screenshotIds: [], notes: [], warnings: [], important: false, evidenceEventSeqs: [], targets: [] };
 }
 
 // Coerces a possibly partial object (e.g. hand-edited in the UI) into a valid document.

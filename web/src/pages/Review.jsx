@@ -55,7 +55,9 @@ export default function Review({ id, me }) {
         </div>
         {err && <div className="alert err" style={{ marginTop: 12 }} data-testid="error">{err}</div>}
         {msg && <div className="alert ok" style={{ marginTop: 12 }}>{msg}</div>}
-        {d.status === 'published' && <div className="alert ok" style={{ marginTop: 12 }} data-testid="published">Published to {repoName} as version <b>{d.published.version}</b> on {fmtDate(d.published.at)}. <a href={d.published.webUrl} target="_blank" rel="noreferrer">Open the published document</a> · <a href={`#/library/${d.published.processId}`}>View in library</a></div>}
+        {d.status === 'published' && <div className="alert ok" style={{ marginTop: 12 }} data-testid="published">Published to {repoName} as version <b>{d.published.version}</b> on {fmtDate(d.published.at)}. <a href={d.published.webUrl} target="_blank" rel="noreferrer">Open the published document</a> · <a href={`#/library/${d.published.processId}`}>View in library</a>
+          {d.published.translations?.map((t) => <span key={t.language}> · <a href={t.webUrl} target="_blank" rel="noreferrer">Open the {t.language === 'de' ? 'German' : 'English'} version</a></span>)}
+          {d.published.translationErrors?.length > 0 && <div className="small" style={{ marginTop: 6 }}>Translation not published: {d.published.translationErrors.map((t) => `${t.language.toUpperCase()} (${t.error})`).join(', ')}</div>}</div>}
         {d.status === 'rejected' && <div className="alert err" style={{ marginTop: 12 }}>Rejected by {d.rejection.by}: {d.rejection.reason || 'no reason given'}. Edit the draft and save it to send it back for approval.</div>}
         {d.lastPublishError && <div className="alert err" style={{ marginTop: 12 }}>Last publishing attempt failed: {d.lastPublishError.message} The approved draft is kept; you can retry.</div>}
         {editable && d.blockers.length > 0 && <div className="alert warn" style={{ marginTop: 12 }} data-testid="blockers"><b>Before this can be approved:</b><ul style={{ margin: '4px 0 0' }}>{d.blockers.map((b, i) => <li key={i}>{b}</li>)}</ul></div>}
