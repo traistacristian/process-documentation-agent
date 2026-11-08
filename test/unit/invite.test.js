@@ -47,3 +47,11 @@ test('validates input and explains missing setup', async () => {
   assert.equal(dev.status().available, false);
   await assert.rejects(dev.list(), (e) => e.code === 'NOT_AVAILABLE');
 });
+
+test('reports which Graph permissions the app token carries', async () => {
+  const payload = Buffer.from(JSON.stringify({ roles: ['Sites.Selected', 'User.Invite.All'], iat: 1700000000 })).toString('base64url');
+  const graph = { ...fakeGraph(), getToken: async () => `x.${payload}.y` };
+  const p = await createInviter(cfg(), { graph }).permissions();
+  assert.deepEqual(p.missing, ['GroupMember.ReadWrite.All']);
+  assert.ok(!JSON.stringify(p).includes(payload), 'the token itself is never returned');
+});

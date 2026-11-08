@@ -11,6 +11,8 @@ function Testers() {
   const load = async () => { try { const x = await api('/api/admin/testers'); setT(x); setG({ Contributor: '', Approver: '', Admin: '', ...x.groups }); } catch (e) { setErr(e.message); setT((o) => o || { available: true, configured: true, people: [] }); } };
   useEffect(() => { load(); }, []);
   const run = async (fn, ok) => { setBusy(true); setErr(null); setMsg(null); try { const r = await fn(); setMsg(ok(r)); await load(); } catch (e) { setErr(e.message); } finally { setBusy(false); } };
+  const [perm, setPerm] = useState(null);
+  const check = async () => { setErr(null); try { setPerm(await api('/api/admin/testers/permissions')); } catch (e) { setErr(e.message); } };
   const saveGroups = () => run(() => api('/api/admin/settings', { method: 'PUT', body: { invitations: { groups: g } } }), () => 'Role groups saved.');
   const invite = () => run(() => api('/api/admin/testers', { method: 'POST', body: f }), (r) => { setF({ ...f, email: '', name: '' }); return r.existing ? `${r.email} already had an account and was added to the ${r.role} group.` : `Invitation sent to ${r.email} with the ${r.role} role. They sign in after accepting it.`; });
   const remove = (p, role) => { if (window.confirm(`Remove the ${role} role from ${p.name}?`)) run(() => api(`/api/admin/testers/${p.id}?role=${role}`, { method: 'DELETE' }), () => `${p.name} no longer has the ${role} role.`); };
@@ -26,7 +28,11 @@ function Testers() {
             <summary className="small" style={{ cursor: 'pointer', fontWeight: 600 }}>Setup: role groups {t.configured ? '✓' : '(required once)'}</summary>
             <p className="small muted">The object ids of the Entra groups that hold the app roles (Entra ID → Groups → the group → Object ID). The app also needs the Microsoft Graph permissions User.Invite.All and GroupMember.ReadWrite.All; your global admin grants them with scripts/Grant-InvitePermissions.ps1, which also prints these ids.</p>
             <div className="grid g3" style={{ gap: 10 }}>{['Contributor', 'Approver', 'Admin'].map((r) => <label key={r} className="f">{r} group<input value={g[r]} onChange={(e) => setG({ ...g, [r]: e.target.value })} placeholder="00000000-0000-0000-0000-000000000000" data-testid={`group-${r}`} /></label>)}</div>
-            <button className="btn sm" onClick={saveGroups} disabled={busy} data-testid="save-groups">Save role groups</button>
+            <div className="row"><button className="btn sm" onClick={saveGroups} disabled={busy} data-testid="save-groups">Save role groups</button><button className="btn sm" onClick={check} data-testid="check-permissions">Check permissions</button></div>
+            {perm && <div className={`alert small ${perm.missing.length ? 'warn' : 'ok'}`} style={{ marginTop: 8 }} data-testid="permissions">
+              {perm.missing.length ? <>Missing in the app's current token: <b>{perm.missing.join(', ')}</b>. Grant them with scripts/Grant-InvitePermissions.ps1; Azure can take up to 24 hours to hand a new permission to the app.</> : <>Both permissions are present. Inviting should work.</>}
+              <div className="muted">Permissions in the token: {perm.roles.join(', ') || 'none'}{perm.issuedAt ? ` · token issued ${new Date(perm.issuedAt).toLocaleString()}` : ''}</div>
+            </div>}
           </details>
           {t.configured && <>
             <div className="row" style={{ alignItems: 'flex-end' }}>

@@ -638,6 +638,7 @@ export function createApp(cfg, deps = {}) {
     const st = inviter.status();
     res.json({ ...st, people: st.available && st.configured ? await inviter.list() : [] });
   }));
+  app.get('/api/admin/testers/permissions', requireRole(ROLES.ADMIN), wrap(async (req, res) => res.json(await inviter.permissions())));
   app.post('/api/admin/testers', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
     const b = req.body || {};
     const r = await inviter.invite({ email: b.email, name: b.name, role: b.role, redirectUrl: cfg.publicUrl || `https://${req.get('host')}`, invitedBy: req.user.name });

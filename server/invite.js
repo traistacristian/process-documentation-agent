@@ -40,6 +40,19 @@ export function createInviter(cfg, { graph } = {}) {
   return {
     status: () => ({ available: available(), configured: configured(), groups: groups() }),
 
+    // Which Graph application permissions the app's current token carries (roles claim only; the token is never returned).
+    async permissions() {
+      if (!available()) throw err(409, 'Only available with Microsoft sign-in (Entra ID mode).', 'NOT_AVAILABLE');
+      const sp = cfg.repository.sharepoint || {};
+      client ??= new GraphClient({ tenantId: sp.tenantId || cfg.auth.entra.tenantId, clientId: sp.clientId, clientSecret: process.env[sp.clientSecretEnv] || sp.clientSecret, auth: sp.auth || 'managedIdentity' });
+      if (!client.getToken) return { roles: [], missing: [] };
+      const tok = await client.getToken();
+      let claims = {};
+      try { claims = JSON.parse(Buffer.from(tok.split('.')[1], 'base64url').toString('utf8')); } catch { /* not a JWT */ }
+      const roles = claims.roles || [];
+      return { roles, missing: ['User.Invite.All', 'GroupMember.ReadWrite.All'].filter((r) => !roles.includes(r)), issuedAt: claims.iat ? new Date(claims.iat * 1000).toISOString() : null, appId: claims.appid || claims.azp || null };
+    },
+
     // Everyone in the three role groups, with their role(s); guests are marked.
     async list() {
       const c = g(); const people = new Map();
