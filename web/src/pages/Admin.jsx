@@ -4,11 +4,49 @@ import { fmtDate } from '../util.jsx';
 
 const lines = (a) => (a || []).join('\n');
 const parse = (t) => t.split('\n').map((x) => x.trim()).filter(Boolean);
+const ROLE_OPTIONS = ['Contributor', 'Approver', 'Admin'];
+// Invitation status -> label and badge colour (existing badge classes).
+const INVITE_STATUS = { pending: ['Invitation pending', 'draft'], accepted: ['Accepted', 'published'], member: ['In your organisation', 'approved'], removed: ['No access', 'removed'], failed: ['Failed', 'failed'] };
+
+function Invitations({ list, configured, busy, onRole }) {
+  const [q, setQ] = useState('');
+  const shown = list.filter((r) => !q || `${r.email} ${r.name || ''} ${r.invitedBy?.name || ''}`.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div style={{ marginTop: 18 }} data-testid="invitations">
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <h3 style={{ margin: 0 }}>Invited users <span className="small muted">({list.length})</span></h3>
+        {list.length > 5 && <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search e-mail or name" style={{ maxWidth: 240 }} aria-label="Search invited users" />}
+      </div>
+      <p className="small muted">Everyone invited from this app, with the role they have now. Changing the role moves a guest to that one role group.</p>
+      <ul className="list">
+        {shown.length === 0 && <li className="empty">{list.length ? 'No invited user matches.' : 'Nobody has been invited yet.'}</li>}
+        {shown.map((r) => {
+          const [label, cls] = INVITE_STATUS[r.status] || [r.status, ''];
+          const editable = configured && r.userId && r.status !== 'failed' && r.guest !== false && r.status !== 'member';
+          return (
+            <li key={r.id} data-testid="invitation" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <span style={{ minWidth: 0 }}>
+                <b>{r.name || r.email}</b> {r.name && <span className="small muted">{r.email}</span>} <span className={`badge ${cls}`} title={r.error || undefined}>{label}</span>
+                <div className="small muted">Invited by {r.invitedBy?.name || 'unknown'} · {fmtDate(r.invitedAt)}{(() => { const h = [...(r.history || [])].reverse().find((x) => x.action === 'role_changed'); return h ? ` · role changed by ${h.by?.name || 'an Admin'} ${fmtDate(h.at)}` : ''; })()}</div>
+              </span>
+              {editable
+                ? <select value={ROLE_OPTIONS.includes(r.role) ? r.role : ''} disabled={busy} style={{ width: 'auto' }} onChange={(e) => onRole(r, e.target.value)} aria-label={`Role of ${r.email}`} data-testid="invitation-role">
+                      {!ROLE_OPTIONS.includes(r.role) && <option value="" disabled>{r.role || 'Choose a role'}</option>}
+                      {ROLE_OPTIONS.map((o) => <option key={o}>{o}</option>)}
+                    </select>
+                : <span className="badge approved" title={r.status === 'member' ? 'People in your organisation get their role in Microsoft Entra ID.' : undefined}>{r.role || '–'}</span>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 function Testers() {
   const [t, setT] = useState(null); const [err, setErr] = useState(null); const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
   const [g, setG] = useState({ Contributor: '', Approver: '', Admin: '' }); const [f, setF] = useState({ email: '', name: '', role: 'Contributor' });
-  const load = async () => { try { const x = await api('/api/admin/testers'); setT(x); setG({ Contributor: '', Approver: '', Admin: '', ...x.groups }); } catch (e) { setErr(e.message); setT((o) => o || { available: true, configured: true, people: [] }); } };
+  const load = async () => { try { const x = await api('/api/admin/testers'); setT(x); if (x.error) setErr(x.error); setG({ Contributor: '', Approver: '', Admin: '', ...x.groups }); } catch (e) { setErr(e.message); setT((o) => o || { available: true, configured: true, people: [], invitations: [] }); } };
   useEffect(() => { load(); }, []);
   const run = async (fn, ok) => { setBusy(true); setErr(null); setMsg(null); try { const r = await fn(); setMsg(ok(r)); await load(); } catch (e) { setErr(e.message); } finally { setBusy(false); } };
   const [perm, setPerm] = useState(null);
@@ -16,6 +54,7 @@ function Testers() {
   const saveGroups = () => run(() => api('/api/admin/settings', { method: 'PUT', body: { invitations: { groups: g } } }), () => 'Role groups saved.');
   const invite = () => run(() => api('/api/admin/testers', { method: 'POST', body: f }), (r) => { setF({ ...f, email: '', name: '' }); return r.existing ? `${r.email} already had an account and was added to the ${r.role} group.` : `Invitation sent to ${r.email} with the ${r.role} role. They sign in after accepting it.`; });
   const remove = (p, role) => { if (window.confirm(`Remove the ${role} role from ${p.name}?`)) run(() => api(`/api/admin/testers/${p.id}?role=${role}`, { method: 'DELETE' }), () => `${p.name} no longer has the ${role} role.`); };
+  const changeRole = (r, role) => { if (role && role !== r.role && window.confirm(`Give ${r.name || r.email} the ${role} role? Their other roles in this app are removed.`)) run(() => api(`/api/admin/testers/${r.userId}/role`, { method: 'PUT', body: { role } }), () => `${r.name || r.email} now has the ${role} role.`); };
   if (!t) return <div className="panel"><span className="spinner" /></div>;
   return (
     <div className="panel" data-testid="testers">
@@ -50,6 +89,7 @@ function Testers() {
             </ul>
             <p className="small muted" style={{ marginBottom: 0 }}>Removing a role keeps the guest account in Entra ID without access to this app. Delete the guest there if it is no longer needed.</p>
           </>}
+          {(t.configured || t.invitations?.length > 0) && <Invitations list={t.invitations || []} configured={t.configured} busy={busy} onRole={changeRole} />}
         </>
       )}
     </div>
