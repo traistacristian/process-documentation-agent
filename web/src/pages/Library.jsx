@@ -87,6 +87,46 @@ function ScriptPanel({ processId, title }) {
   );
 }
 
+// Recording to Power Automate: a cloud flow drafted as a build guide (trigger, inputs, actions per step).
+function FlowPanel({ processId, title }) {
+  const [f, setF] = useState(null); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const draft = async (regenerate) => {
+    setBusy(true); setErr(null);
+    try { setF(await api(`/api/processes/${processId}/flow`, { method: 'POST', body: { regenerate } })); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const download = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([f.markdown], { type: 'text/markdown' }));
+    a.download = `${processId} - ${title.replace(/[^\w .-]/g, '')} - Power Automate.md`; a.click();
+  };
+  return (
+    <div className="alert" style={{ marginTop: 12 }} data-testid="flow-panel">
+      <b>Power Automate.</b> Claude drafts a cloud flow for this procedure as a build guide: trigger, inputs, one action per step, connectors and licensing. Nothing is created in your tenant.
+      <div className="row" style={{ marginTop: 8 }}>
+        <button className="btn" onClick={() => draft(false)} disabled={busy} data-testid="flow-draft">{busy ? 'Drafting the flow…' : f ? 'Show flow' : 'Draft a Power Automate flow'}</button>
+        {f && <button className="btn sm ghost" onClick={() => draft(true)} disabled={busy}>Draft it again</button>}
+        {f && <button className="btn sm" onClick={download}>Download build guide (.md)</button>}
+      </div>
+      {err && <div className="alert err small" style={{ marginTop: 8 }}>{err}</div>}
+      {f && (
+        <div style={{ marginTop: 10 }} data-testid="flow-result">
+          <p>{f.summary}</p>
+          {!f.automatable && <div className="alert warn small">This procedure cannot be automated with Power Automate.</div>}
+          <div className="small"><b>Trigger:</b> {f.trigger.type} – {f.trigger.description}</div>
+          {f.inputs.length > 0 && <div className="small"><b>Inputs:</b> {f.inputs.map((i) => `${i.name} (${i.type})`).join(', ')}</div>}
+          <ol className="small" style={{ marginTop: 6 }}>{f.actions.map((a, i) => <li key={i}><b>{a.name}</b>{a.stepNumber ? ` (step ${a.stepNumber})` : ''}: {a.connector} – <i>{a.action}</i>{a.settings ? `. ${a.settings}` : ''}{a.notes ? ` (${a.notes})` : ''}</li>)}</ol>
+          <div className="small"><b>Connectors:</b> {f.connectors.map((c) => `${c.name}${c.premium ? ' (premium)' : ''}`).join(', ')}</div>
+          {f.powerAppsForm.recommended && <div className="small"><b>Power Apps form:</b> {f.powerAppsForm.fields.join(', ')}{f.powerAppsForm.notes ? `. ${f.powerAppsForm.notes}` : ''}</div>}
+          {f.desktopFlowSteps.length > 0 && <div className="small"><b>Power Automate Desktop:</b> {f.desktopFlowSteps.map((x) => `step ${x.stepNumber} (${x.reason})`).join('; ')}</div>}
+          {f.manualSteps.length > 0 && <div className="small"><b>Stays manual:</b> {f.manualSteps.map((x) => `step ${x.stepNumber} (${x.reason})`).join('; ')}</div>}
+          <div className="small"><b>Licensing:</b> {f.licensing}</div>
+          {f.assumptions.length > 0 && <div className="small"><b>Assumptions to verify:</b><ul>{f.assumptions.map((x) => <li key={x}>{x}</li>)}</ul></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Library({ processId }) {
   const [list, setList] = useState(null); const [p, setP] = useState(null); const [err, setErr] = useState(null); const [q, setQ] = useState(''); const [lang, setLang] = useState('');
   useEffect(() => { api(`/api/processes?q=${encodeURIComponent(q)}`).then(setList).catch((e) => setErr(e.message)); }, [q]);
@@ -98,7 +138,7 @@ export default function Library({ processId }) {
       {p.translations?.length > 0 && <div className="row small" style={{ marginTop: 8 }} data-testid="languages">Language:
         {[p.doc.info.language === 'de' && !lang ? 'de' : 'en', ...['en', 'de']].filter((x, i, a) => a.indexOf(x) === i).map((l) => <button key={l} className={`btn sm${(p.doc.info.language || 'en') === l ? ' primary' : ''}`} onClick={() => setLang(l)}>{l === 'de' ? 'Deutsch' : 'English'}</button>)}</div>}
       <GuideButton doc={p.doc} />
-      {getConfig()?.aiEngine !== 'rules' && <ScriptPanel processId={processId} title={p.doc.info.title} />}
+      {getConfig()?.aiEngine !== 'rules' && <><ScriptPanel processId={processId} title={p.doc.info.title} /><FlowPanel processId={processId} title={p.doc.info.title} /></>}
       <DocPreview doc={p.doc} shotUrl={(id) => `/api/processes/${processId}/screenshots/${id}`} />
     </div>
   );

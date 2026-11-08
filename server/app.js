@@ -16,6 +16,7 @@ import { protectScreenshot } from './engine/privacy.js';
 import { attachTargets } from './engine/targets.js';
 import { translateDoc, otherLanguages } from './engine/translate.js';
 import { generateScript } from './engine/script.js';
+import { generateFlow, flowToMarkdown } from './engine/flow.js';
 import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from './engine/compare.js';
 import { normalizeDoc } from './engine/schema.js';
 import { applyAnswer } from './engine/clarify.js';
@@ -164,6 +165,7 @@ export function createApp(cfg, deps = {}) {
   const protectFn = deps.protectScreenshot || protectScreenshot;
   const translate = deps.translateDoc || translateDoc;
   const draftScript = deps.generateScript || generateScript;
+  const draftFlow = deps.generateFlow || generateFlow;
   const scriptCache = new Map(); // processId@version -> script (each draft costs an AI call)
   const privacyJobs = new Map();
   const blurEnabled = () => cfg.capture.blurPersonalData !== false && aiAvailable(cfg);
@@ -205,15 +207,19 @@ export function createApp(cfg, deps = {}) {
     res.json(p);
   }));
   // Recording to script: a PowerShell draft of a published procedure, for an admin to review.
-  app.post('/api/processes/:pid/script', requireRole(ROLES.CONTRIBUTOR), wrap(async (req, res) => {
-    if (!aiAvailable(cfg)) throw httpError(409, 'Scripts are written by the AI, which is not configured.');
+  // Recording to automation: a PowerShell script or a Power Automate flow drafted from a published
+  // procedure, for an admin or maker to review. Nothing is run or created in the tenant.
+  const automations = { script: { make: (doc) => draftScript({ cfg, doc }), what: 'script' }, flow: { make: (doc) => draftFlow({ cfg, doc }).then((f) => ({ ...f, markdown: flowToMarkdown(f) })), what: 'Power Automate flow' } };
+  for (const kind of Object.keys(automations)) app.post(`/api/processes/:pid/${kind}`, requireRole(ROLES.CONTRIBUTOR), wrap(async (req, res) => {
+    const a = automations[kind];
+    if (!aiAvailable(cfg)) throw httpError(409, `The ${a.what} is drafted by the AI, which is not configured.`);
     const p = await repo.get(req.params.pid);
     if (!p) throw httpError(404, 'Process not found');
-    const key = `${p.doc.info.processId}@${p.doc.info.version}`;
+    const key = `${kind}:${p.doc.info.processId}@${p.doc.info.version}`;
     if (!req.body?.regenerate && scriptCache.has(key)) return res.json(scriptCache.get(key));
-    const out = await draftScript({ cfg, doc: normalizeDoc(p.doc) }).catch((e) => { throw httpError(502, `The script could not be drafted: ${e.message}`); });
+    const out = await a.make(normalizeDoc(p.doc)).catch((e) => { throw httpError(502, `The ${a.what} could not be drafted: ${e.message}`); });
     scriptCache.set(key, out);
-    audit.write(req.user, 'process.script_drafted', { processId: key, automatable: out.automatable, warnings: out.warnings.length });
+    audit.write(req.user, `process.${kind}_drafted`, { processId: key, automatable: out.automatable });
     res.json(out);
   }));
   app.get('/api/processes/:pid/screenshots/:shot', wrap(async (req, res) => {

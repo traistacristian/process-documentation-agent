@@ -238,3 +238,7 @@ test('with Claude configured, finished steps get an AI description that the auth
 test('scripts need the AI and the Contributor role', async () => {
   assert.equal((await call('POST', '/api/processes/PRC-2026-000000/script', {}, 'alex')).status, 409);
 });
+
+test('flows need the AI too', async () => {
+  assert.equal((await call('POST', '/api/processes/PRC-2026-000000/flow', {}, 'alex')).status, 409);
+});

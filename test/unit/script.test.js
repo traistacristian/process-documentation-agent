@@ -24,3 +24,16 @@ test('review warnings flag risky scripts', () => {
   assert.equal(w.length, 5);
   assert.deepEqual(reviewWarnings(''), []);
 });
+
+test('a Power Automate flow is drafted as a build guide', async () => {
+  const { generateFlow, flowToMarkdown } = await import('../../server/engine/flow.js');
+  const flow = { automatable: true, summary: 'Creates the user.', trigger: { type: 'Power Apps (V2)', description: 'Started from the onboarding form' }, inputs: [{ name: 'UserPrincipalName', type: 'Text', description: 'UPN' }], actions: [{ stepNumber: 1, name: 'Create user', connector: 'HTTP with Microsoft Entra ID', action: 'Invoke an HTTP request', settings: 'POST /v1.0/users', notes: '' }], connectors: [{ name: 'HTTP with Microsoft Entra ID', premium: true }], powerAppsForm: { recommended: true, fields: ['First name', 'Last name'], notes: '' }, desktopFlowSteps: [], manualSteps: [{ stepNumber: 2, reason: 'Hand over the laptop' }], licensing: 'Needs Power Automate Premium.', assumptions: [] };
+  let req;
+  const client = { messages: { stream: (r) => { req = r; return { finalMessage: async () => ({ model: 'claude-haiku-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(flow) }] }) }; } } };
+  const out = await generateFlow({ cfg: loadConfig(), doc: doc(), client });
+  assert.match(req.system, /standard connectors/);
+  const md = flowToMarkdown(out);
+  assert.match(md, /HTTP with Microsoft Entra ID \(premium\)/);
+  assert.match(md, /Step 2: Hand over the laptop/);
+  assert.match(md, /Fields: First name, Last name/);
+});
