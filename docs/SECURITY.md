@@ -10,6 +10,8 @@
 
 Optional separation of duties (`auth.requireSeparateApprover: true`): the person who recorded a process cannot approve it.
 
+**Human check after sign-in** (`auth.humanCheck`, on by default): before the app opens, the user solves a small calculation or number puzzle (for example `7 × 6 + 3` or `5, 11, 17, 23, …?`). The answer is checked on the server: the puzzle id is HMAC-signed and holds only a hash of the answer, each puzzle can be answered once and expires after `challengeMinutes`, and `maxFailures` wrong answers in a row lock the user out for `lockMinutes`. A correct answer gives a signed pass bound to the user (valid `passHours`), sent as `X-Human-Pass`; every other user API call returns 428 without it. Capture clients are not affected (they use their capture token). This is a deterrent against scripted use of a signed-in session, not a replacement for MFA: in Entra mode the Microsoft sign-in (with Conditional Access / MFA) stays the real login control. Set `PDA_HUMAN_CHECK_SECRET` when more than one server instance runs, so passes are valid on every instance; `PDA_HUMAN_CHECK=false` turns the check off.
+
 Read access to **published** documents is governed by SharePoint permissions on the library, not by the app. The app reads through its own Graph identity, so restrict the library to the audience that should see IT procedures. Optionally (`assignOwnerPermissions`) the process owner gets edit rights on the document item.
 
 ## Capture safeguards (implemented)

@@ -40,6 +40,8 @@ export function loadConfig(overrides = {}) {
   if (env.ENTRA_SPA_CLIENT_ID) cfg.auth.entra.spaClientId = env.ENTRA_SPA_CLIENT_ID;
   if (env.ENTRA_API_SCOPE) cfg.auth.entra.apiScope = env.ENTRA_API_SCOPE;
   if (env.PDA_REQUIRE_SEPARATE_APPROVER) cfg.auth.requireSeparateApprover = env.PDA_REQUIRE_SEPARATE_APPROVER === 'true';
+  if (env.PDA_HUMAN_CHECK) cfg.auth.humanCheck = { ...(cfg.auth.humanCheck || {}), enabled: env.PDA_HUMAN_CHECK !== 'false' };
+  if (env.PDA_HUMAN_CHECK_SECRET) cfg.auth.humanCheck = { ...(cfg.auth.humanCheck || {}), secret: env.PDA_HUMAN_CHECK_SECRET };
   if (env.ANTHROPIC_MODEL) cfg.ai.model = env.ANTHROPIC_MODEL;
   if (env.ANTHROPIC_EFFORT) cfg.ai.effort = env.ANTHROPIC_EFFORT;
   if (env.PDA_AI_DESCRIBE_STEPS) cfg.ai.describeSteps = env.PDA_AI_DESCRIBE_STEPS !== 'false';

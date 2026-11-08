@@ -10,7 +10,8 @@
       { "id": "admin", "name": "IT Admin", "email": "admin@contoso.example", "roles": ["Contributor", "Approver", "Admin"] }
     ],
     "entra": { "tenantId": "", "apiClientId": "", "spaClientId": "", "apiScope": "" },
-    "requireSeparateApprover": false
+    "requireSeparateApprover": false,
+    "humanCheck": { "enabled": true, "passHours": 12, "challengeMinutes": 5, "maxFailures": 5, "lockMinutes": 5 }
   },
   "ai": {
     "provider": "auto",

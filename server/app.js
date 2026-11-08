@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { Store, newId } from './store.js';
 import { AuditLog } from './audit.js';
 import { createAuth, ROLES } from './auth.js';
+import { createHumanCheck } from './human-check.js';
 import { saveAdminSettings } from './config.js';
 import { sanitizeEvent } from './engine/redact.js';
 import { generateWithRules } from './engine/generate-rules.js';
@@ -37,6 +38,7 @@ export function createApp(cfg, deps = {}) {
   const audit = deps.audit || new AuditLog(cfg.dataDir);
   const repo = deps.repo || createRepository(cfg, deps.repoDeps);
   const { authenticate, requireRole } = createAuth(cfg);
+  const humanCheck = deps.humanCheck || createHumanCheck(cfg.auth.humanCheck || {});
   const generators = { rules: generateWithRules, claude: deps.generateWithClaude || generateWithClaude };
   const app = express();
   app.disable('x-powered-by');
@@ -101,6 +103,7 @@ export function createApp(cfg, deps = {}) {
       repository: { mode: cfg.repository.mode, label: repo.label },
       aiEngine: engineName(),
       categories: cfg.categories,
+      humanCheck: humanCheck.enabled,
     });
   });
 
@@ -196,6 +199,27 @@ export function createApp(cfg, deps = {}) {
   // ---------------------------------------------------------------- everything below requires a signed-in user
   app.use('/api', authenticate);
   app.get('/api/me', (req, res) => res.json(req.user));
+
+  // ---------------------------------------------------------------- human check (calculation / number puzzle)
+  // After sign-in the user solves a small puzzle; the API is locked until then (see human-check.js).
+  const sendLocked = (res, ms) => res.status(429).set('retry-after', String(Math.ceil(ms / 1000))).json({ error: `Too many wrong answers. Try again in ${Math.ceil(ms / 60000)} minute(s).`, code: 'HUMAN_CHECK_LOCKED', retryAfterMs: ms });
+  app.get('/api/human-check', (req, res) => {
+    if (!humanCheck.enabled) return res.json({ enabled: false });
+    const locked = humanCheck.lockedUntil(req.user.id);
+    if (locked) return sendLocked(res, locked - Date.now());
+    res.set('cache-control', 'no-store').json({ enabled: true, passed: humanCheck.hasPass(req.user.id, req.get('x-human-pass')), ...humanCheck.newChallenge(req.user.id) });
+  });
+  app.post('/api/human-check', (req, res) => {
+    if (!humanCheck.enabled) return res.json({ enabled: false });
+    const r = humanCheck.verify(req.user.id, req.body?.challengeId, req.body?.answer);
+    if (r.ok) { audit.write(req.user, 'human_check.passed', {}); return res.json({ pass: r.pass, expiresAt: r.expiresAt }); }
+    audit.write(req.user, 'human_check.failed', { reason: r.reason });
+    if (r.reason === 'locked') return sendLocked(res, r.retryAfterMs);
+    const msg = { wrong: 'That answer is not right. Here is a new puzzle.', expired: 'The puzzle expired. Here is a new one.', invalid: 'This puzzle is no longer valid. Here is a new one.' }[r.reason];
+    res.status(400).json({ error: msg, code: `HUMAN_CHECK_${r.reason.toUpperCase()}` });
+  });
+  app.use('/api', (req, res, next) => (!humanCheck.enabled || humanCheck.hasPass(req.user.id, req.get('x-human-pass'))
+    ? next() : res.status(428).json({ error: 'Please solve the security puzzle first.', code: 'HUMAN_CHECK_REQUIRED' })));
 
   // ---------------------------------------------------------------- repository
   app.get('/api/repository/status', wrap(async (req, res) => res.json(await repo.status())));

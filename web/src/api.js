@@ -28,18 +28,30 @@ export async function refreshConfig() {
 export const devUser = () => { try { return localStorage.getItem('pda.devUser') || config?.devUsers?.[2]?.id; } catch { return config?.devUsers?.[2]?.id; } };
 export const setDevUser = (id) => { try { localStorage.setItem('pda.devUser', id); } catch { /* ignore */ } };
 
+// Human check: after solving the sign-in puzzle the server returns a pass, kept for this browser tab
+// and sent as X-Human-Pass. When the server asks for a new check (428), the puzzle screen is shown.
+const PASS_KEY = 'pda.humanPass';
+export function humanPass() {
+  try { const p = JSON.parse(sessionStorage.getItem(PASS_KEY) || 'null'); return p && p.expiresAt > Date.now() ? p : null; } catch { return null; }
+}
+export const setHumanPass = (p) => { try { if (p) sessionStorage.setItem(PASS_KEY, JSON.stringify(p)); else sessionStorage.removeItem(PASS_KEY); } catch { /* ignore */ } };
+export const HUMAN_CHECK_EVENT = 'pda:human-check-required';
+
 async function headers() {
+  const pass = humanPass();
+  const extra = pass ? { 'x-human-pass': pass.pass } : {};
   if (config?.authMode === 'entra') {
     const t = await msal.acquireTokenSilent({ scopes: [config.entra.scope] }).catch(() => msal.acquireTokenRedirect({ scopes: [config.entra.scope] }));
-    return { authorization: `Bearer ${t.accessToken}` };
+    return { authorization: `Bearer ${t.accessToken}`, ...extra };
   }
-  return { 'x-dev-user': devUser() };
+  return { 'x-dev-user': devUser(), ...extra };
 }
 
 export async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(await headers()) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const isJson = res.headers.get('content-type')?.includes('json');
   const data = isJson ? await res.json() : null;
+  if (res.status === 428 && data?.code === 'HUMAN_CHECK_REQUIRED') { setHumanPass(null); dispatchEvent(new Event(HUMAN_CHECK_EVENT)); }
   if (!res.ok) throw Object.assign(new Error(data?.error || `Request failed (${res.status})`), { status: res.status, code: data?.code });
   return data;
 }
