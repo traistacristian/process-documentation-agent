@@ -170,7 +170,7 @@ export function createApp(cfg, deps = {}) {
   const translate = deps.translateDoc || translateDoc;
   const draftScript = deps.generateScript || generateScript;
   const draftFlow = deps.generateFlow || generateFlow;
-  const inviter = createInviter(cfg, { graph: deps.inviteGraph });
+  const inviter = createInviter(cfg, { graph: deps.inviteGraph, store });
   const scriptCache = new Map(); // processId@version -> script (each draft costs an AI call)
   const privacyJobs = new Map();
   const blurEnabled = () => cfg.capture.blurPersonalData !== false && aiAvailable(cfg);
@@ -634,19 +634,28 @@ export function createApp(cfg, deps = {}) {
 
   // ---------------------------------------------------------------- administration
   // Testers: invite guests by e-mail into a role group; list and remove them (guests only).
+  // invitations: every invitation sent from the app (who, role, by whom, when, status).
   app.get('/api/admin/testers', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
     const st = inviter.status();
-    res.json({ ...st, people: st.available && st.configured ? await inviter.list() : [] });
+    // If Graph cannot be read, the recorded invitations are still shown (with their last known status).
+    let people = null; let error = null;
+    if (st.available && st.configured) { try { people = await inviter.list(); } catch (e) { error = e.message; } }
+    res.json({ ...st, people: people || [], invitations: inviter.invitations(people), ...(error ? { error } : {}) });
+  }));
+  app.put('/api/admin/testers/:userId/role', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
+    const r = await inviter.setRole({ userId: req.params.userId, role: req.body?.role, by: req.user });
+    audit.write(req.user, 'admin.tester_role_changed', { role: r.role, userId: r.id });
+    res.json(r);
   }));
   app.get('/api/admin/testers/permissions', requireRole(ROLES.ADMIN), wrap(async (req, res) => res.json(await inviter.permissions())));
   app.post('/api/admin/testers', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
     const b = req.body || {};
-    const r = await inviter.invite({ email: b.email, name: b.name, role: b.role, redirectUrl: cfg.publicUrl || `https://${req.get('host')}`, invitedBy: req.user.name });
+    const r = await inviter.invite({ email: b.email, name: b.name, role: b.role, redirectUrl: cfg.publicUrl || `https://${req.get('host')}`, invitedBy: { id: req.user.id, name: req.user.name } });
     audit.write(req.user, 'admin.tester_invited', { role: r.role, userId: r.id });
     res.json(r);
   }));
   app.delete('/api/admin/testers/:userId', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
-    const r = await inviter.remove({ userId: req.params.userId, role: req.query.role });
+    const r = await inviter.remove({ userId: req.params.userId, role: req.query.role, by: req.user });
     audit.write(req.user, 'admin.tester_removed', { role: r.role, userId: r.id });
     res.json(r);
   }));

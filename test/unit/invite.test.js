@@ -1,12 +1,16 @@
 // Inviting testers: guest invitation + role group membership through a fake Microsoft Graph.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createInviter } from '../../server/invite.js';
+import { Store } from '../../server/store.js';
 
 const G = { Contributor: '11111111-1111-1111-1111-111111111111', Approver: '22222222-2222-2222-2222-222222222222', Admin: '' };
 const GUEST = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'; const MEMBER = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-function fakeGraph() {
-  const calls = []; const members = { [G.Contributor]: new Set([MEMBER]), [G.Approver]: new Set() };
+function fakeGraph(extraGroups = {}) {
+  const calls = []; const members = { [G.Contributor]: new Set([MEMBER]), [G.Approver]: new Set(), ...extraGroups };
   const users = { [GUEST]: { id: GUEST, displayName: 'Tess Tester', mail: 'tess@example.com', userType: 'Guest', externalUserState: 'PendingAcceptance' }, [MEMBER]: { id: MEMBER, displayName: 'Inge Intern', userPrincipalName: 'inge@contoso.example', userType: 'Member' } };
   return {
     calls,
@@ -54,4 +58,36 @@ test('reports which Graph permissions the app token carries', async () => {
   const p = await createInviter(cfg(), { graph }).permissions();
   assert.deepEqual(p.missing, ['GroupMember.ReadWrite.All']);
   assert.ok(!JSON.stringify(p).includes(payload), 'the token itself is never returned');
+});
+
+test('records every invitation and keeps its status and role in step with the role groups', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pda-inv-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = new Store(dir); const graph = fakeGraph();
+  const inv = createInviter(cfg(), { graph, store });
+  await inv.invite({ email: 'Tess@Example.com', name: 'Tess Tester', role: 'Contributor', redirectUrl: 'x', invitedBy: { id: 'admin', name: 'IT Admin' } });
+  let [r] = inv.invitations();
+  assert.equal(r.email, 'tess@example.com'); assert.equal(r.role, 'Contributor'); assert.equal(r.status, 'pending');
+  assert.deepEqual(r.invitedBy, { id: 'admin', name: 'IT Admin' }); assert.ok(r.invitedAt); assert.equal(r.userId, GUEST);
+
+  // Change the role: the guest ends up in exactly the new group.
+  await inv.setRole({ userId: GUEST, role: 'Approver', by: { id: 'admin', name: 'IT Admin' } });
+  const people = await inv.list();
+  assert.deepEqual(people.find((p) => p.id === GUEST).roles, ['Approver']);
+  [r] = inv.invitations(people);
+  assert.equal(r.role, 'Approver'); assert.deepEqual(r.history.map((h) => h.action), ['invited', 'role_changed']);
+  await assert.rejects(inv.setRole({ userId: MEMBER, role: 'Approver' }), (e) => e.code === 'NOT_GUEST');
+  await assert.rejects(inv.setRole({ userId: GUEST, role: 'Owner' }), (e) => e.status === 400);
+
+  // Removing the last role shows the invitation as removed; inviting again with the same address keeps one record.
+  await inv.remove({ userId: GUEST, role: 'Approver' });
+  [r] = inv.invitations(await inv.list());
+  assert.equal(r.status, 'removed');
+  await inv.invite({ email: 'tess@example.com', role: 'Contributor', redirectUrl: 'x', invitedBy: 'IT Admin' });
+  assert.equal(inv.invitations().length, 1);
+
+  // A failed first invitation is recorded too.
+  const failing = createInviter(cfg(), { store, graph: { ...fakeGraph(), post: async () => { throw Object.assign(new Error('nope'), { status: 403 }); } } });
+  await assert.rejects(failing.invite({ email: 'new@example.com', role: 'Contributor', redirectUrl: 'x', invitedBy: 'IT Admin' }));
+  const failed = failing.invitations().find((x) => x.email === 'new@example.com');
+  assert.equal(failed.status, 'failed'); assert.match(failed.error, /permission/);
 });
