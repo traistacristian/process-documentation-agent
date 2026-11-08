@@ -20,6 +20,7 @@ import { generateFlow, flowToMarkdown } from './engine/flow.js';
 import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from './engine/compare.js';
 import { normalizeDoc } from './engine/schema.js';
 import { sampleDocs } from './engine/samples.js';
+import { createInviter } from './invite.js';
 import { applyAnswer } from './engine/clarify.js';
 import { renderDocx, renderMarkdown } from './engine/render.js';
 import { createRepository } from './repo/index.js';
@@ -169,6 +170,7 @@ export function createApp(cfg, deps = {}) {
   const translate = deps.translateDoc || translateDoc;
   const draftScript = deps.generateScript || generateScript;
   const draftFlow = deps.generateFlow || generateFlow;
+  const inviter = createInviter(cfg, { graph: deps.inviteGraph });
   const scriptCache = new Map(); // processId@version -> script (each draft costs an AI call)
   const privacyJobs = new Map();
   const blurEnabled = () => cfg.capture.blurPersonalData !== false && aiAvailable(cfg);
@@ -631,6 +633,23 @@ export function createApp(cfg, deps = {}) {
   }));
 
   // ---------------------------------------------------------------- administration
+  // Testers: invite guests by e-mail into a role group; list and remove them (guests only).
+  app.get('/api/admin/testers', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
+    const st = inviter.status();
+    res.json({ ...st, people: st.available && st.configured ? await inviter.list() : [] });
+  }));
+  app.post('/api/admin/testers', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
+    const b = req.body || {};
+    const r = await inviter.invite({ email: b.email, name: b.name, role: b.role, redirectUrl: cfg.publicUrl || `https://${req.get('host')}`, invitedBy: req.user.name });
+    audit.write(req.user, 'admin.tester_invited', { role: r.role, userId: r.id });
+    res.json(r);
+  }));
+  app.delete('/api/admin/testers/:userId', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
+    const r = await inviter.remove({ userId: req.params.userId, role: req.query.role });
+    audit.write(req.user, 'admin.tester_removed', { role: r.role, userId: r.id });
+    res.json(r);
+  }));
+
   // Demo content: publishes a few realistic sample processes (category "Sample"); existing titles are skipped.
   app.post('/api/admin/samples', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
     const existing = new Set((await repo.list()).map((p) => p.title));
@@ -648,7 +667,9 @@ export function createApp(cfg, deps = {}) {
   app.put('/api/admin/settings', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
     const b = req.body || {};
     if (b.categories && (!Array.isArray(b.categories) || b.categories.some((c) => typeof c !== 'string' || !c.trim()))) throw httpError(400, 'Categories must be a list of names');
-    saveAdminSettings(cfg, { categories: b.categories?.map((c) => c.trim()), capture: b.capture, retention: b.retention, notifications: b.notifications });
+    if (b.invitations?.groups && Object.values(b.invitations.groups).some((v) => v && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v).trim()))) throw httpError(400, 'Group ids must be Entra object ids (GUIDs)');
+    const invitations = b.invitations?.groups ? { groups: Object.fromEntries(Object.entries(b.invitations.groups).filter(([k]) => Object.values(ROLES).includes(k)).map(([k, v]) => [k, String(v || '').trim()])) } : undefined;
+    saveAdminSettings(cfg, { categories: b.categories?.map((c) => c.trim()), capture: b.capture, retention: b.retention, notifications: b.notifications, invitations });
     audit.write(req.user, 'admin.settings_changed', { keys: Object.keys(b) });
     res.json({ ok: true });
   }));

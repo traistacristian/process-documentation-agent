@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const ADMIN_KEYS = ['categories', 'capture', 'retention', 'notifications'];
+export const ADMIN_KEYS = ['categories', 'capture', 'retention', 'notifications', 'invitations'];
 
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }

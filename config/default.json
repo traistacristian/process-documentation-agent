@@ -60,5 +60,6 @@
     "purgeRawAfterPublish": true,
     "abandonedSessionHours": 72
   },
-  "notifications": { "webhookUrl": "" }
+  "notifications": { "webhookUrl": "" },
+  "invitations": { "groups": { "Contributor": "", "Approver": "", "Admin": "" } }
 }

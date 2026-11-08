@@ -172,6 +172,16 @@ test('an admin can add sample processes once; they count towards the time-saved 
   assert.equal(one.doc.info.category, 'Sample'); assert.ok(one.doc.steps.length >= 4);
 });
 
+test('testers: admin only, not available in the demo mode, group ids are validated', async () => {
+  assert.equal((await call('GET', '/api/admin/testers', null, 'sam')).status, 403);
+  const t = (await call('GET', '/api/admin/testers')).body;
+  assert.equal(t.available, false); assert.deepEqual(t.people, []);
+  assert.equal((await call('POST', '/api/admin/testers', { email: 'a@b.example', role: 'Contributor' })).status, 409);
+  assert.equal((await call('PUT', '/api/admin/settings', { invitations: { groups: { Contributor: 'not-a-guid' } } })).status, 400);
+  assert.equal((await call('PUT', '/api/admin/settings', { invitations: { groups: { Contributor: '11111111-1111-1111-1111-111111111111', Approver: '', Admin: '' } } })).status, 200);
+  assert.equal((await call('GET', '/api/admin/testers')).body.groups.Contributor, '11111111-1111-1111-1111-111111111111');
+});
+
 test('drafts and recordings can be deleted one by one by their owner or an Admin', async () => {
   const { s } = await recordAndGenerate();
   assert.equal((await call('DELETE', `/api/sessions/${s.id}`, null, 'alex')).status, 409, 'an active recording must be stopped first');

@@ -67,4 +67,5 @@ export class GraphClient {
   post(p, body, o = {}) { return this.request('POST', p, { ...o, body }); }
   patch(p, body, o = {}) { return this.request('PATCH', p, { ...o, body }); }
   put(p, body, o = {}) { return this.request('PUT', p, { ...o, body }); }
+  delete(p, o) { return this.request('DELETE', p, o); }
 }

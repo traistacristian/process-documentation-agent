@@ -5,6 +5,51 @@ import { fmtDate } from '../util.jsx';
 const lines = (a) => (a || []).join('\n');
 const parse = (t) => t.split('\n').map((x) => x.trim()).filter(Boolean);
 
+function Testers() {
+  const [t, setT] = useState(null); const [err, setErr] = useState(null); const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
+  const [g, setG] = useState({ Contributor: '', Approver: '', Admin: '' }); const [f, setF] = useState({ email: '', name: '', role: 'Contributor' });
+  const load = async () => { try { const x = await api('/api/admin/testers'); setT(x); setG({ Contributor: '', Approver: '', Admin: '', ...x.groups }); } catch (e) { setErr(e.message); setT((o) => o || { available: true, configured: true, people: [] }); } };
+  useEffect(() => { load(); }, []);
+  const run = async (fn, ok) => { setBusy(true); setErr(null); setMsg(null); try { const r = await fn(); setMsg(ok(r)); await load(); } catch (e) { setErr(e.message); } finally { setBusy(false); } };
+  const saveGroups = () => run(() => api('/api/admin/settings', { method: 'PUT', body: { invitations: { groups: g } } }), () => 'Role groups saved.');
+  const invite = () => run(() => api('/api/admin/testers', { method: 'POST', body: f }), (r) => { setF({ ...f, email: '', name: '' }); return r.existing ? `${r.email} already had an account and was added to the ${r.role} group.` : `Invitation sent to ${r.email} with the ${r.role} role. They sign in after accepting it.`; });
+  const remove = (p, role) => { if (window.confirm(`Remove the ${role} role from ${p.name}?`)) run(() => api(`/api/admin/testers/${p.id}?role=${role}`, { method: 'DELETE' }), () => `${p.name} no longer has the ${role} role.`); };
+  if (!t) return <div className="panel"><span className="spinner" /></div>;
+  return (
+    <div className="panel" data-testid="testers">
+      <h2>Testers</h2>
+      <p className="small muted">Invite people outside your organisation to try the app. They receive a Microsoft guest invitation, sign in with their own e-mail address and need no licence. Their role comes from the role group they are added to.</p>
+      {err && <div className="alert err small">{err}</div>}{msg && <div className="alert ok small">{msg}</div>}
+      {!t.available ? <div className="alert info small">Available when users sign in with their Microsoft account. In the demo mode the test users are fixed.</div> : (
+        <>
+          <details open={!t.configured} style={{ marginBottom: 12 }}>
+            <summary className="small" style={{ cursor: 'pointer', fontWeight: 600 }}>Setup: role groups {t.configured ? '✓' : '(required once)'}</summary>
+            <p className="small muted">The object ids of the Entra groups that hold the app roles (Entra ID → Groups → the group → Object ID). The app also needs the Microsoft Graph permissions User.Invite.All and GroupMember.ReadWrite.All; your global admin grants them with scripts/Grant-InvitePermissions.ps1, which also prints these ids.</p>
+            <div className="grid g3" style={{ gap: 10 }}>{['Contributor', 'Approver', 'Admin'].map((r) => <label key={r} className="f">{r} group<input value={g[r]} onChange={(e) => setG({ ...g, [r]: e.target.value })} placeholder="00000000-0000-0000-0000-000000000000" data-testid={`group-${r}`} /></label>)}</div>
+            <button className="btn sm" onClick={saveGroups} disabled={busy} data-testid="save-groups">Save role groups</button>
+          </details>
+          {t.configured && <>
+            <div className="row" style={{ alignItems: 'flex-end' }}>
+              <label className="f" style={{ flex: 2, minWidth: 220, marginBottom: 0 }}>E-mail address<input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="name@example.com" data-testid="invite-email" /></label>
+              <label className="f" style={{ flex: 2, minWidth: 180, marginBottom: 0 }}>Name <span className="opt">(optional)</span><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+              <label className="f" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>Role<select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })} data-testid="invite-role"><option>Contributor</option><option>Approver</option><option>Admin</option></select></label>
+              <button className="btn primary" onClick={invite} disabled={busy || !f.email.includes('@')} data-testid="invite">Send invitation</button>
+            </div>
+            <ul className="list" style={{ marginTop: 12 }}>
+              {t.people.length === 0 && <li className="empty">Nobody in the role groups yet.</li>}
+              {t.people.map((p) => (
+                <li key={p.id} data-testid="tester"><span><b>{p.name}</b> <span className="small muted">{p.email}</span> {p.guest && <span className="badge">{p.state === 'PendingAcceptance' ? 'guest · invitation pending' : 'guest'}</span>}</span>
+                  <span className="row">{p.roles.map((r) => <span key={r} className="row" style={{ gap: 2 }}><span className="badge approved">{r}</span>{p.guest && <button className="btn sm ghost" disabled={busy} onClick={() => remove(p, r)} aria-label={`Remove ${r} from ${p.name}`}>✕</button>}</span>)}</span></li>
+              ))}
+            </ul>
+            <p className="small muted" style={{ marginBottom: 0 }}>Removing a role keeps the guest account in Entra ID without access to this app. Delete the guest there if it is no longer needed.</p>
+          </>}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Admin() {
   const [s, setS] = useState(null); const [repo, setRepo] = useState(null); const [audit, setAudit] = useState([]);
   const [f, setF] = useState(null); const [msg, setMsg] = useState(null); const [err, setErr] = useState(null);
@@ -71,6 +116,7 @@ export default function Admin() {
         </div>
       </div>
       <div className="row" style={{ marginBottom: 16 }}><button className="btn primary" onClick={save} data-testid="save-settings">Save settings</button></div>
+      <Testers />
       <div className="panel">
         <h2>Audit log</h2>
         <ul className="list feed">{audit.map((a, i) => <li key={i}><span className="t" style={{ width: 150 }}>{fmtDate(a.ts)}</span><span style={{ width: 120 }}>{a.user?.name || 'system'}</span><span className="badge">{a.action}</span><span className="small muted">{[a.title, a.processId, a.version && `v${a.version}`, a.draftId, a.sessionId, a.error].filter(Boolean).join(' · ')}</span></li>)}</ul>

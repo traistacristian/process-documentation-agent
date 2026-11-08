@@ -38,3 +38,14 @@ Only redacted events and screenshots of the recording are sent; screenshots are 
 ## Other controls
 
 No standing secrets in production: the App Service managed identity reaches SharePoint (Graph `Sites.Selected`, write on one site) and Microsoft Foundry; the only optional secret, a Claude API key, lives in Key Vault and is resolved by App Service. GitHub deploys with OIDC, FTP and basic publishing credentials are disabled, and the app refuses to start with test users on App Service. The browser extension and desktop agent can be locked by policy to pair only with your server (`allowedServers`). Security headers (`nosniff`, `DENY` framing, `no-referrer`, HSTS behind HTTPS); IDs validated before touching the file system; capture tokens stored only as hashes; ETag-based optimistic concurrency on drafts and on the repository (no silent overwrite); Graph via managed identity (or client credentials) with `Sites.Selected`; secrets only from environment / Key Vault references; append-only audit log of every state change.
+
+## Inviting testers (optional)
+
+Administration → Testers lets an Admin invite people outside the organisation as Microsoft Entra B2B guests and put them into one of the three role groups. It is off until a Global Administrator runs `scripts/Grant-InvitePermissions.ps1`, which grants the App Service managed identity two Microsoft Graph application permissions:
+
+| Permission | Why | Risk and mitigation |
+|---|---|---|
+| `User.Invite.All` | Send the guest invitation | Can invite any address. Only Admins of the app can trigger it; every invitation is in the audit log. |
+| `GroupMember.ReadWrite.All` | Add the guest to the role group, remove them again | Tenant-wide. The app only uses the three group ids saved in the settings, and only removes guests, never members of your organisation. Revoke with `Grant-InvitePermissions.ps1 -Remove`. |
+
+Guests need no licence. Guest invitations must be allowed in the External collaboration settings. Assigning app roles to groups needs Microsoft Entra ID P1.
