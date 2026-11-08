@@ -172,3 +172,22 @@ details.sec { scroll-margin-top: 70px; }
 .invite-pop { position: absolute; right: 0; top: calc(100% + 8px); width: 320px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 40px rgba(20, 33, 43, .18); padding: 16px; z-index: 30; }
 .invite-pop > b { display: block; margin-bottom: 10px; font-size: 15px; }
 @media (max-width: 600px) { .invite-pop { position: fixed; left: 16px; right: 16px; top: 64px; width: auto; } }
+.acct { position: relative; }
+.acct-btn { font: inherit; display: flex; align-items: center; gap: 8px; background: none; border: 1px solid transparent; border-radius: 99px; padding: 3px 10px 3px 3px; cursor: pointer; color: var(--ink); }
+.acct-btn:hover, .acct-btn[aria-expanded="true"] { background: var(--soft); border-color: var(--line); }
+.acct-name { font-weight: 600; font-size: 13px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar.lg { width: 42px; height: 42px; font-size: 15px; flex: none; }
+.acct-pop { position: absolute; right: 0; top: calc(100% + 8px); width: 290px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 40px rgba(20, 33, 43, .18); padding: 8px; z-index: 30; }
+.acct-head { display: flex; gap: 12px; padding: 10px 10px 12px; border-bottom: 1px solid var(--soft); margin-bottom: 6px; }
+.acct-head .small { word-break: break-all; }
+.acct-pop a, .acct-pop button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 8px; text-decoration: none; color: var(--ink); font: inherit; background: none; border: 0; cursor: pointer; text-align: left; }
+.acct-pop a:hover, .acct-pop button:hover { background: var(--soft); }
+.acct-pop .mi { width: 22px; height: 22px; border-radius: 6px; background: var(--brand-soft); color: var(--brand-dark); display: grid; place-items: center; font-size: 12px; flex: none; }
+.acct-pop hr { border: 0; border-top: 1px solid var(--soft); margin: 6px 0; }
+.acct-pop button[data-testid="sign-out"] { color: var(--rec); }
+.acct-pop button[data-testid="sign-out"] .mi { background: var(--rem); color: var(--rec); }
+.logo-mark { width: 52px; height: 52px; border-radius: 14px; background: linear-gradient(135deg, var(--brand), #13998d); color: #fff; display: inline-grid; place-items: center; font-size: 26px; font-weight: 800; }
+@media (max-width: 760px) { .acct-name { display: none; } .topbar nav a { padding: 6px 6px; } .topbar .logo small { display: none; } }
+.help h2 { margin-top: 4px; }
+.help .q { border-top: 1px solid var(--soft); padding: 12px 0; }
+.help .q b { display: block; margin-bottom: 4px; }

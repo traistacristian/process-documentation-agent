@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, getConfig, devUser, setDevUser } from './api.js';
+import { api, getConfig, devUser, setDevUser, signOut, isSignedOut, signIn } from './api.js';
 import { usePoll } from './util.jsx';
 import Landing from './pages/Landing.jsx';
 import NewProcess from './pages/NewProcess.jsx';
@@ -8,6 +8,7 @@ import Recorder from './pages/Recorder.jsx';
 import Review from './pages/Review.jsx';
 import Admin from './pages/Admin.jsx';
 import Library from './pages/Library.jsx';
+import Help from './pages/Help.jsx';
 
 // Top-bar menu for Admins: invite a tester by e-mail with a role (Contributor by default).
 function InviteMenu() {
@@ -52,6 +53,54 @@ function InviteMenu() {
   );
 }
 
+const initials = (n) => (n || '?').split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase();
+
+// Account menu: who is signed in, the main places in the app, and Sign out.
+function AccountMenu({ me }) {
+  const [open, setOpen] = useState(false); const ref = React.useRef(null);
+  useEffect(() => { const f = () => setOpen(false); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', close); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  if (!me) return null;
+  const item = (href, icon, label) => <a href={href} role="menuitem" onClick={() => setOpen(false)}><span className="mi">{icon}</span>{label}</a>;
+  return (
+    <div className="acct" ref={ref}>
+      <button className="acct-btn" onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} data-testid="account-menu" title={me.name}>
+        <span className="avatar">{initials(me.name)}</span><span className="acct-name">{me.name}</span><span className="muted">▾</span>
+      </button>
+      {open && (
+        <div className="acct-pop" role="menu" data-testid="account-pop">
+          <div className="acct-head"><span className="avatar lg">{initials(me.name)}</span><div><b>{me.name}</b><div className="small muted">{me.email}</div><div className="row" style={{ gap: 4, marginTop: 4 }}>{me.roles.map((r) => <span key={r} className="badge approved">{r}</span>)}</div></div></div>
+          {item('#/', '⌂', 'Home')}
+          {item('#/new', '●', 'Record a new process')}
+          {item('#/update', '↻', 'Update an existing process')}
+          {item('#/library', '☰', 'Process library')}
+          {item('#/help', '?', 'Help and getting started')}
+          {me.roles.includes('Admin') && item('#/admin', '⚙', 'Administration')}
+          <hr />
+          <button role="menuitem" onClick={signOut} data-testid="sign-out"><span className="mi">⎋</span>Sign out</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignedOut() {
+  return (
+    <main><div className="panel" style={{ maxWidth: 460, margin: '80px auto', textAlign: 'center', padding: 36 }} data-testid="signed-out">
+      <span className="logo-mark">P</span>
+      <h1 style={{ marginTop: 14 }}>You are signed out</h1>
+      <p className="muted">Thanks for using the Process Documentation Agent.</p>
+      <button className="btn primary big" onClick={signIn} data-testid="sign-in">Sign in again</button>
+    </div></main>
+  );
+}
+
 function useHash() {
   const [h, setH] = useState(location.hash.slice(1) || '/');
   useEffect(() => { const f = () => { setH(location.hash.slice(1) || '/'); window.scrollTo(0, 0); }; addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
@@ -70,6 +119,7 @@ export default function App() {
   }, 4000, [route]);
 
   const [, page, id] = route.split('/');
+  if (isSignedOut()) return <SignedOut />;
   let view;
   if (!page) view = <Landing me={me} />;
   else if (page === 'new') view = <NewProcess me={me} />;
@@ -78,6 +128,7 @@ export default function App() {
   else if (page === 'review') view = <Review id={id} me={me} />;
   else if (page === 'library') view = <Library processId={id} />;
   else if (page === 'admin') view = <Admin />;
+  else if (page === 'help') view = <Help me={me} />;
   else view = <div className="panel">Page not found.</div>;
 
   const link = (href, label) => <a href={`#${href}`} className={(`/${page || ''}` === href || (href === '/' && !page)) ? 'active' : ''}>{label}</a>;
@@ -88,6 +139,7 @@ export default function App() {
         <nav>
           {link('/', 'Home')}
           {link('/library', 'Process library')}
+          {link('/help', 'Help')}
           {me?.roles.includes('Admin') && link('/admin', 'Administration')}
         </nav>
         <div className="spacer" />
@@ -100,7 +152,8 @@ export default function App() {
               {cfg.devUsers.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.roles.at(-1)}</option>)}
             </select>
           </label>
-        ) : me && <span className="row small" title={me.roles.join(', ')}><span className="avatar">{(me.name || '?').split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase()}</span>{me.name}</span>}
+        ) : null}
+        <AccountMenu me={me} />
       </header>
       <main>{view}</main>
     </>
