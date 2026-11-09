@@ -21,7 +21,7 @@ const waitDraft = async (id) => { for (let i = 0; i < 50; i++) { const d = (awai
 
 before(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pda-api-'));
-  cfg = loadConfig({ dataDir: dir, ai: { provider: 'rules' } });
+  cfg = loadConfig({ dataDir: dir, ai: { provider: 'rules' }, auth: { humanCheck: { enabled: false } } });
   cfg.repository.local.path = path.join(dir, 'repository');
   app = createApp(cfg);
   srv = http.createServer(app);
@@ -220,7 +220,7 @@ test('the author describes each step during recording; the text lands in the doc
 
 test('with Claude configured, finished steps get an AI description that the author only corrects', async () => {
   const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'pda-ai-'));
-  const c2 = loadConfig({ dataDir: d2, ai: { provider: 'anthropic' } });
+  const c2 = loadConfig({ dataDir: d2, ai: { provider: 'anthropic' }, auth: { humanCheck: { enabled: false } } });
   c2.repository.local.path = path.join(d2, 'repository');
   const calls = []; let protectedShots = 0;
   const { generateWithRules } = await import('../../server/engine/generate-rules.js');

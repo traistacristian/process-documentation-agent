@@ -43,6 +43,8 @@ py -m pda_agent --server http://localhost:3000 --code <pairing code from the rec
 | `ANTHROPIC_MODEL` | Default `claude-opus-5-5` |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Enables Azure Monitor telemetry; audit entries are sent as `audit.*` custom events |
 | `PDA_REQUIRE_SEPARATE_APPROVER` | `true` = the recorder cannot approve their own process |
+| `PDA_HUMAN_CHECK` | `false` = no calculation/number puzzle after sign-in (on by default) |
+| `PDA_HUMAN_CHECK_SECRET` | Shared signing secret for the puzzle passes; set it when running more than one instance |
 
 Categories, capture policy, retention and the Power Automate webhook are edited by Admins in the Administration page (stored in `<dataDir>/settings.json`).
 

@@ -27,7 +27,7 @@ const snap = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursiv
 
 before(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pda-e2e-'));
-  const cfg = loadConfig({ dataDir, repository: { mode: 'local', local: { path: path.join(dataDir, 'repository') } }, ai: { provider: 'rules' } });
+  const cfg = loadConfig({ dataDir, repository: { mode: 'local', local: { path: path.join(dataDir, 'repository') } }, ai: { provider: 'rules' }, auth: { humanCheck: { enabled: false } } });
   cfg.repository.local.path = path.join(dataDir, 'repository');
   appServer = http.createServer(createApp(cfg));
   appUrl = `http://127.0.0.1:${await listen(appServer)}`;
