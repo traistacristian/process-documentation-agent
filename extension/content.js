@@ -83,6 +83,14 @@
   }
 
   const base = () => ({ ts: Date.now(), url: location.href, pageTitle: document.title, app: 'Browser', clientId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` });
+  // Where the element is on the screen (CSS pixels of the visible page), so the generated document can
+  // number the clicks and frame the fields on the step's screenshot. Positions only, never content.
+  const boxOf = (el, pt) => {
+    const r = el?.getBoundingClientRect?.();
+    if (!r || (!r.width && !r.height)) return undefined;
+    const round = (n) => Math.round(n);
+    return { x: round(r.x), y: round(r.y), w: round(r.width), h: round(r.height), vw: innerWidth, vh: innerHeight, sx: round(scrollX), sy: round(scrollY), ...(pt ? { px: round(pt.clientX), py: round(pt.clientY) } : {}) };
+  };
 
   // ---------------------------------------------------------------- interactions
   let lastPointer = null;
@@ -92,13 +100,13 @@
     if (!el || ['input', 'textarea'].includes(el.tagName.toLowerCase()) && !['checkbox', 'radio', 'button', 'submit'].includes(el.type)) { lastPointer = { el, ts: Date.now(), focusOnly: true }; return; }
     lastPointer = { el, ts: Date.now() };
     const r = el.getBoundingClientRect();
-    send({ type: 'event', event: { ...base(), type: 'click', element: describe(el) }, screenshot: !!state.policy?.screenshotOnClick, rect: { x: r.x, y: r.y, w: r.width, h: r.height } });
+    send({ type: 'event', event: { ...base(), type: 'click', element: describe(el), box: boxOf(el, e) }, screenshot: !!state.policy?.screenshotOnClick, rect: { x: r.x, y: r.y, w: r.width, h: r.height } });
   }, true);
 
   document.addEventListener('click', (e) => {
     if (!active() || e.detail !== 0) return; // keyboard-activated clicks (Enter / Space)
     const el = e.target.closest?.(INTERACTIVE) || e.target;
-    send({ type: 'event', event: { ...base(), type: 'click', element: describe(el) }, screenshot: false });
+    send({ type: 'event', event: { ...base(), type: 'click', element: describe(el), box: boxOf(el) }, screenshot: false });
   }, true);
 
   // Text fields report "change" only on blur, which happens after the pointerdown of the next click.
@@ -122,7 +130,7 @@
     const evType = tag === 'select' || type === 'checkbox' || type === 'radio' ? 'change' : 'input';
     const ts = evType === 'input' && editStart.has(el) ? editStart.get(el) : Date.now();
     editStart.delete(el);
-    send({ type: 'event', event: { ...base(), ts, type: evType, element, value } });
+    send({ type: 'event', event: { ...base(), ts, type: evType, element, value, box: boxOf(el) } });
   }, true);
 
   document.addEventListener('submit', (e) => {
@@ -134,7 +142,7 @@
   document.addEventListener('keydown', (e) => {
     if (!active() || e.key !== 'Enter' || e.isComposing) return;
     const el = e.target;
-    if (el?.tagName?.toLowerCase() === 'input' && !isSensitive(el)) send({ type: 'event', event: { ...base(), type: 'key', text: 'Enter', element: describe(el) } });
+    if (el?.tagName?.toLowerCase() === 'input' && !isSensitive(el)) send({ type: 'event', event: { ...base(), type: 'key', text: 'Enter', element: describe(el), box: boxOf(el) } });
   }, true);
 
   // ---------------------------------------------------------------- navigation (incl. single-page apps)
@@ -218,11 +226,8 @@
     const pats = (state.policy?.sensitiveFieldPatterns || []).map((p) => `input[name*="${p}" i],input[id*="${p}" i]`).join(',');
     maskStyle.textContent = `input[type=password],input[autocomplete^=cc-],input[autocomplete=one-time-code],[data-pda-sensitive],[data-sensitive]${pats ? ',' + pats : ''}{filter:blur(6px)!important;-webkit-text-security:disc!important}`;
     document.documentElement.appendChild(maskStyle);
-    if (rect && rect.w > 0) {
-      hl = document.createElement('div');
-      Object.assign(hl.style, { position: 'fixed', left: `${rect.x - 3}px`, top: `${rect.y - 3}px`, width: `${rect.w + 6}px`, height: `${rect.h + 6}px`, border: '3px solid #E8590C', borderRadius: '4px', zIndex: 2147483647, pointerEvents: 'none', boxShadow: '0 0 0 4px rgba(232,89,12,.25)' });
-      document.documentElement.appendChild(hl);
-    }
+    // The clicked element is no longer outlined on the page: the server numbers every click of a
+    // step on the screenshot instead (see server/engine/annotate.js).
     try { coverPersonalData(); } catch { /* never block the screenshot */ }
   }
   function unmask() { if (guideHost) guideHost.style.visibility = ''; if (guideBox) guideBox.style.visibility = ''; maskStyle?.remove(); hl?.remove(); piiBoxes.forEach((d) => d.remove()); piiBoxes = []; maskStyle = null; hl = null; }

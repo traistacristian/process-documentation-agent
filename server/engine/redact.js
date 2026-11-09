@@ -77,6 +77,17 @@ export function isSensitiveField(element = {}, capture = {}) {
   return (capture.sensitiveFieldPatterns || []).some((p) => new RegExp(`(^|[^a-z])${p.toLowerCase()}([^a-z]|$)`).test(label));
 }
 
+// Position of the clicked element / field on screen (CSS pixels): only numbers are kept.
+function sanitizeBox(b) {
+  if (!b || typeof b !== 'object') return undefined;
+  const n = (v, min, max) => (Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : null);
+  const out = { x: n(b.x, -20000, 20000), y: n(b.y, -20000, 20000), w: n(b.w, 0, 20000), h: n(b.h, 0, 20000), vw: n(b.vw, 1, 20000), vh: n(b.vh, 1, 20000), sx: n(b.sx, 0, 1e7) ?? 0, sy: n(b.sy, 0, 1e7) ?? 0 };
+  if ([out.x, out.y, out.w, out.h, out.vw, out.vh].includes(null)) return undefined;
+  const px = n(b.px, -20000, 20000); const py = n(b.py, -20000, 20000);
+  if (px !== null && py !== null) Object.assign(out, { px, py });
+  return out;
+}
+
 // Normalise and sanitise one incoming capture event. Returns null when the event must be dropped.
 export function sanitizeEvent(raw, capture) {
   const ev = {
@@ -91,6 +102,7 @@ export function sanitizeEvent(raw, capture) {
     screenshotId: typeof raw.screenshotId === 'string' ? raw.screenshotId : undefined,
     level: ['success', 'error', 'warning', 'info'].includes(raw.level) ? raw.level : undefined,
     clientId: raw.clientId ? String(raw.clientId).slice(0, 80) : undefined,
+    box: sanitizeBox(raw.box),
   };
   if (raw.element && typeof raw.element === 'object') {
     const e = raw.element;

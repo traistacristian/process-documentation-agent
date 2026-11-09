@@ -59,6 +59,8 @@ function stepTitle(seg, n) {
   return `Work in ${page}`;
 }
 
+const CRITICAL = /\b(delete|remove|reset|block|disable|deactivate|revoke|wipe|permanently|löschen|entfernen|zurücksetzen|sperren|deaktivieren|widerrufen)\b/i;
+
 export function generateWithRules({ meta, events, screenshotsAvailable = new Set(), base = null, user }) {
   const segs = segmentEvents(events);
   const doc = base ? structuredClone(base) : emptyDoc();
@@ -100,6 +102,8 @@ export function generateWithRules({ meta, events, screenshotsAvailable = new Set
       instr.unshift(`Open ${q(pageName(seg.location))} in ${s.application}.`);
     }
     s.instructions = instr;
+    // Highlight steps where a mistake is costly or hard to undo, besides the ones marked while recording.
+    if (!s.important && CRITICAL.test(instr.join(' '))) s.important = true;
     const inputs = seg.events.filter((e) => ['input', 'change', 'select'].includes(e.type)).map((e) => e.element?.label || e.element?.name).filter(Boolean);
     s.input = [...new Set(inputs)].join(', ');
     const ok = [...seg.events].reverse().find((e) => e.type === 'feedback' && e.level !== 'error');

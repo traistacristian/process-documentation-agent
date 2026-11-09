@@ -29,3 +29,10 @@ export function Lightbox({ url, onClose }) {
 }
 
 export function StatusBadge({ s }) { return <span className={`badge ${s}`}>{s}</span>; }
+
+// Legend under a step's screenshots when they carry numbered click markers.
+export function MarksHint({ step }) {
+  const shown = (step.marks || []).filter((m) => step.screenshotIds.includes(m.shotId));
+  if (!shown.length) return null;
+  return <p className="marks-hint small muted"><span className="dot">1</span>The numbers on the screenshot show the order of the {shown.length === 1 ? 'click' : `${shown.length} clicks`}; frames mark the field or button used.</p>;
+}
