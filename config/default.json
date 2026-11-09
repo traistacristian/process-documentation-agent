@@ -61,5 +61,7 @@
     "abandonedSessionHours": 72
   },
   "notifications": { "webhookUrl": "" },
+  "speech": { "endpoint": "" },
+  "meetings": { "maxFrames": 400, "maxAudioMb": 200 },
   "invitations": { "groups": { "Contributor": "", "Approver": "", "Admin": "" } }
 }

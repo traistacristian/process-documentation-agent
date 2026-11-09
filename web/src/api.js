@@ -54,6 +54,14 @@ export async function api(path, { method = 'GET', body } = {}) {
   return data;
 }
 
+// Binary upload (meeting audio chunks).
+export async function apiUpload(path, blob) {
+  const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/octet-stream', ...(await headers()) }, body: blob });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw Object.assign(new Error(data?.error || `Upload failed (${res.status})`), { status: res.status });
+  return data;
+}
+
 // Image and file URLs need auth headers, so they are fetched as blobs.
 const blobCache = new Map();
 export async function authedBlobUrl(path) {

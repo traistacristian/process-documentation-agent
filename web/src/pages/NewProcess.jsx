@@ -7,7 +7,7 @@ export default function NewProcess({ me }) {
   const [cfg, setCfg] = useState(getConfig());
   // Categories can be changed by an admin at any time: always show the current list.
   useEffect(() => { refreshConfig().then((c) => setCfg({ ...c })); }, []);
-  const [f, setF] = useState({ title: '', description: '', department: '', owner: '', category: '', language: 'en' });
+  const [f, setF] = useState({ title: new URLSearchParams(location.hash.split('?')[1] || '').get('name') || '', description: new URLSearchParams(location.hash.split('?')[1] || '').get('why') || '', department: '', owner: '', category: '', language: 'en' });
   const [consent, setConsent] = useState(false); const [dups, setDups] = useState([]); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 

@@ -266,3 +266,74 @@ test('scripts need the AI and the Contributor role', async () => {
 test('flows need the AI too', async () => {
   assert.equal((await call('POST', '/api/processes/PRC-2026-000000/flow', {}, 'alex')).status, 409);
 });
+
+test('meetings: audio and screenshots are recorded, transcribed and turned into suggestions the reviewer decides on', async () => {
+  // Without Azure AI Speech the feature is off.
+  const { s: s0 } = await recordAndGenerate();
+  await call('POST', `/api/sessions/${s0.id}/control`, { action: 'stop' }, 'alex');
+  const d0 = await waitDraft((await call('POST', `/api/sessions/${s0.id}/generate`, {}, 'alex')).body.id);
+  assert.equal((await call('POST', `/api/drafts/${d0.id}/meetings`, { consent: true }, 'alex')).status, 409);
+  assert.equal((await call('GET', '/api/config')).body.meetings, false);
+
+  const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'pda-mtg-'));
+  const c3 = loadConfig({ dataDir: d3, ai: { provider: 'rules' } }); c3.repository.local.path = path.join(d3, 'repository');
+  let heardBytes = 0;
+  const a3 = createApp(c3, {
+    protectScreenshot: async () => ({ count: 0, kinds: [] }),
+    transcribeAudio: async ({ path: p }) => { heardBytes = fs.statSync(p).size; return [{ ms: 5000, durationMs: 3000, speaker: 1, text: 'You need the User Administrator role for this.' }, { ms: 61000, durationMs: 4000, speaker: 2, text: 'Afterwards always check the audit log. And nobody knows how we remove licences from leavers.' }]; },
+    findMeetingSuggestions: async ({ clarifications, transcript }) => {
+      assert.equal(transcript.length, 2);
+      const perm = clarifications.find((c) => c.section === 'prerequisites');
+      return [
+        { kind: 'answer', clarificationId: perm.id, stepNumber: null, title: null, text: 'User Administrator role', instructions: [], quote: 'You need the User Administrator role', atSeconds: 5 },
+        { kind: 'step', clarificationId: null, stepNumber: 2, title: 'Check the audit log', text: 'Confirm the change in the audit log.', instructions: ['Open the audit log.', 'Search for the user.'], quote: 'Afterwards always check the audit log', atSeconds: 61 },
+        { kind: 'topic', clarificationId: null, stepNumber: null, title: 'Remove licences from leavers', text: 'Nobody in the meeting knew the procedure.', instructions: [], quote: 'nobody knows how we remove licences', atSeconds: 64 },
+      ];
+    },
+  });
+  const s3 = http.createServer(a3); await new Promise((r) => s3.listen(0, '127.0.0.1', r));
+  const b3 = `http://127.0.0.1:${s3.address().port}`;
+  const c = async (method, p, body, user = 'alex', headers = {}) => { const r = await fetch(b3 + p, { method, headers: { 'content-type': 'application/json', 'x-dev-user': user, ...headers }, body: Buffer.isBuffer(body) ? body : body ? JSON.stringify(body) : undefined }); return { status: r.status, body: r.headers.get('content-type')?.includes('json') ? await r.json() : null }; };
+  try {
+    assert.equal((await c('GET', '/api/config')).body.meetings, true);
+    const s = (await c('POST', '/api/sessions', { mode: 'new', title: 'Grant helpdesk permissions', consent: true })).body;
+    const pair = (await c('POST', '/api/capture/pair', { code: s.pairing.code, client: { type: 'browser-extension' } }, null)).body;
+    const h = { authorization: `Bearer ${pair.captureToken}`, 'x-session-id': s.id };
+    await c('POST', '/api/capture/events', { events: v1Events().filter((e) => e.type !== 'start').map((e) => ({ ...e, seq: undefined, screenshotId: undefined, clientId: `c${e.seq}` })) }, null, h);
+    await c('POST', `/api/sessions/${s.id}/control`, { action: 'stop' });
+    const g = (await c('POST', `/api/sessions/${s.id}/generate`, {})).body;
+    let d; for (let i = 0; i < 50; i++) { d = (await c('GET', `/api/drafts/${g.id}`)).body; if (d.status !== 'generating') break; await new Promise((r) => setTimeout(r, 50)); }
+    const stepsBefore = d.doc.steps.length;
+
+    assert.equal((await c('POST', `/api/drafts/${d.id}/meetings`, {})).status, 400, 'consent is required');
+    const m = (await c('POST', `/api/drafts/${d.id}/meetings`, { consent: true })).body;
+    assert.equal(m.status, 'recording');
+    assert.equal((await c('POST', `/api/drafts/${d.id}/meetings`, { consent: true })).status, 409, 'one meeting at a time');
+    await c('POST', `/api/drafts/${d.id}/meetings/${m.id}/audio`, Buffer.from('chunk-1'), 'alex', { 'content-type': 'application/octet-stream' });
+    await c('POST', `/api/drafts/${d.id}/meetings/${m.id}/audio`, Buffer.from('chunk-2'), 'alex', { 'content-type': 'application/octet-stream' });
+    const f1 = (await c('POST', `/api/drafts/${d.id}/meetings/${m.id}/frames`, { data: PNG, atMs: 2000 })).body;
+    const f2 = (await c('POST', `/api/drafts/${d.id}/meetings/${m.id}/frames`, { data: PNG, atMs: 63000 })).body;
+    assert.equal((await c('POST', `/api/drafts/${d.id}/meetings/${m.id}/stop`)).body.status, 'transcribing');
+    let mt; for (let i = 0; i < 50; i++) { d = (await c('GET', `/api/drafts/${d.id}`)).body; mt = d.meetings[0]; if (['done', 'failed'].includes(mt.status)) break; await new Promise((r) => setTimeout(r, 50)); }
+    assert.equal(mt.status, 'done', mt.error);
+    assert.equal(heardBytes, 14, 'both audio chunks were joined');
+    assert.equal(mt.transcript, undefined, 'the transcript is not sent to the browser');
+    assert.ok(!fs.existsSync(path.join(d3, 'meetings', `${m.id}.webm`)), 'audio is deleted after transcription');
+    const [ans, step, topic] = mt.suggestions;
+    assert.equal(step.screenshotId, f2.id, 'the screenshot closest to the moment is attached');
+    assert.equal(ans.screenshotId, null); assert.equal(topic.screenshotId, null);
+    assert.ok(f1.id);
+
+    d = (await c('POST', `/api/drafts/${d.id}/meetings/${m.id}/suggestions/${ans.id}`, { action: 'accept' })).body;
+    assert.equal(d.clarifications.find((x) => x.id === ans.clarificationId).status, 'answered');
+    assert.ok(d.doc.prerequisites.permissions.join(' ').includes('User Administrator'));
+    d = (await c('POST', `/api/drafts/${d.id}/meetings/${m.id}/suggestions/${step.id}`, { action: 'accept' })).body;
+    assert.equal(d.doc.steps.length, stepsBefore + 1);
+    assert.equal(d.doc.steps[2].title, 'Check the audit log'); assert.equal(d.doc.steps[2].number, 3);
+    assert.deepEqual(d.doc.steps[2].screenshotIds, [f2.id]);
+    d = (await c('POST', `/api/drafts/${d.id}/meetings/${m.id}/suggestions/${topic.id}`, { action: 'reject' })).body;
+    assert.deepEqual(d.meetings[0].suggestions.map((x) => x.status), ['accepted', 'accepted', 'rejected']);
+    assert.equal((await c('POST', `/api/drafts/${d.id}/meetings/${m.id}/suggestions/${topic.id}`, { action: 'accept' })).status, 404, 'decided once');
+    assert.equal((await c('GET', `/api/drafts/${d.id}/screenshots/${f2.id}`)).status, 200, 'meeting screenshots are served like recorded ones');
+  } finally { s3.close(); fs.rmSync(d3, { recursive: true, force: true }); }
+});

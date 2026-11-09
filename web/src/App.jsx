@@ -9,6 +9,7 @@ import Review from './pages/Review.jsx';
 import Admin from './pages/Admin.jsx';
 import Library from './pages/Library.jsx';
 import Help from './pages/Help.jsx';
+import Meeting from './pages/Meeting.jsx';
 
 // Top-bar menu for Admins: invite a tester by e-mail with a role (Contributor by default).
 function InviteMenu() {
@@ -118,7 +119,7 @@ export default function App() {
     setActive(list.find((s) => s.status === 'recording' || s.status === 'paused' ) || null);
   }, 4000, [route]);
 
-  const [, page, id] = route.split('/');
+  const [, page, id] = route.split('?')[0].split('/');
   if (isSignedOut()) return <SignedOut />;
   let view;
   if (!page) view = <Landing me={me} />;
@@ -129,6 +130,7 @@ export default function App() {
   else if (page === 'library') view = <Library processId={id} />;
   else if (page === 'admin') view = <Admin />;
   else if (page === 'help') view = <Help me={me} />;
+  else if (page === 'meeting') view = <Meeting draftId={id} />;
   else view = <div className="panel">Page not found.</div>;
 
   const link = (href, label) => <a href={`#${href}`} className={(`/${page || ''}` === href || (href === '/' && !page)) ? 'active' : ''}>{label}</a>;

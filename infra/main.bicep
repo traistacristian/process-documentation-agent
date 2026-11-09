@@ -66,7 +66,14 @@ param budgetStartDate string = '${utcNow('yyyy-MM')}-01'
 @description('The recorder of a process may not approve it.')
 param requireSeparateApprover bool = false
 
+@description('Meeting recordings: an Azure AI Speech resource (free F0 tier, 5 audio hours a month) for transcription. Only one F0 Speech resource is allowed per subscription; set speechSku to S0 if one exists elsewhere.')
+param enableSpeech bool = true
+param speechSku string = 'F0'
+param speechLocation string = location
+
 var suffix = uniqueString(resourceGroup().id)
+var speechName = '${namePrefix}-speech-${suffix}'
+var speechUser = 'f2dc8367-1007-4938-bd23-fe263f013447' // Cognitive Services Speech User
 var webAppName = '${namePrefix}-app-${suffix}'
 var storageName = take('${namePrefix}st${suffix}', 24)
 var keyVaultName = take('${namePrefix}-kv-${suffix}', 24)
@@ -159,6 +166,9 @@ var baseSettings = [
   { name: 'WEBSITE_RUN_FROM_PACKAGE', value: '1' }
   { name: 'NODE_ENV', value: 'production' }
 ]
+var speechSettings = enableSpeech ? [
+  { name: 'AZURE_SPEECH_ENDPOINT', value: 'https://${speechName}.cognitiveservices.azure.com/' }
+] : []
 var monitorSettings = paid ? [
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights!.properties.ConnectionString }
 ] : []
@@ -189,7 +199,7 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
-      appSettings: concat(baseSettings, monitorSettings, aiSettings)
+      appSettings: concat(baseSettings, monitorSettings, aiSettings, speechSettings)
       azureStorageAccounts: paid ? {
         pdadata: {
           type: 'AzureFiles'
@@ -214,6 +224,24 @@ resource scmPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-
   parent: web
   name: 'scm'
   properties: { allow: false }
+}
+
+// Speech for meeting transcription: keyless, the app's managed identity gets the Speech User role.
+resource speech 'Microsoft.CognitiveServices/accounts@2024-10-01' = if (enableSpeech) {
+  name: speechName
+  location: speechLocation
+  kind: 'SpeechServices'
+  sku: { name: speechSku }
+  properties: { customSubDomainName: speechName, disableLocalAuth: true, publicNetworkAccess: 'Enabled' }
+}
+resource speechAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableSpeech) {
+  scope: speech
+  name: guid(speechName, web.id, speechUser)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', speechUser)
+    principalId: web.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
 }
 
 resource kvAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (paid) {

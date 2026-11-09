@@ -4,15 +4,16 @@ import { usePoll, fmtDate, StatusBadge } from '../util.jsx';
 import DocEditor, { sectionStatus } from '../components/DocEditor.jsx';
 import DiffView from '../components/DiffView.jsx';
 import DocPreview from '../components/DocPreview.jsx';
+import MeetingPanel from '../components/MeetingPanel.jsx';
 
 export default function Review({ id, me }) {
   const cfg = getConfig();
   const [d, setD] = useState(null); const [doc, setDoc] = useState(null); const [dirty, setDirty] = useState(false);
-  const [tab, setTab] = useState('doc'); const [err, setErr] = useState(null); const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState(new URLSearchParams(location.hash.split('?')[1] || '').get('tab') || 'doc'); const [err, setErr] = useState(null); const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
   const [answers, setAnswers] = useState({}); const [rejectOpen, setRejectOpen] = useState(false); const [reason, setReason] = useState(''); const [summary, setSummary] = useState(''); const [pubName, setPubName] = useState(null);
 
   const load = (x) => { setD(x); if (x.doc) setDoc(x.doc); setDirty(false); };
-  usePoll(async () => { if (!d || d.status === 'generating') { try { load(await api(`/api/drafts/${id}`)); } catch (e) { setErr(e.message); } } }, 1500, [id, d?.status]);
+  usePoll(async () => { if (!d || d.status === 'generating' || d.meetings?.some((m) => ['transcribing', 'analysing'].includes(m.status))) { try { load(await api(`/api/drafts/${id}`)); } catch (e) { setErr(e.message); } } }, 1500, [id, d?.status, d?.meetings?.map((m) => m.status).join()]);
   useEffect(() => { if (d?.mode === 'update') setTab('changes'); }, [d?.mode]);
 
   if (!d) return err ? <div className="alert err">{err}</div> : <span className="spinner" />;
@@ -38,6 +39,7 @@ export default function Review({ id, me }) {
     save({ decisions: all, silent: true });
   };
   const answer = (c, status) => save({ clarifications: [{ id: c.id, status, answer: answers[c.id] || '' }], silent: true });
+  const decideSuggestion = (m, sg, action, text) => call(() => api(`/api/drafts/${id}/meetings/${m.id}/suggestions/${sg.id}`, { method: 'POST', body: { action, ...(text !== undefined ? { text } : {}) } }), action === 'accept' && sg.kind !== 'topic' ? 'Added to the document.' : null);
   const approve = () => call(() => api(`/api/drafts/${id}/approve`, { method: 'POST', body: { summary } }), 'Approved. You can now publish this version.');
   const reject = () => call(() => api(`/api/drafts/${id}/reject`, { method: 'POST', body: { reason } }), 'The draft was rejected and returned to the author.').then(() => setRejectOpen(false));
   const publish = () => call(() => api(`/api/drafts/${id}/publish`, { method: 'POST', body: { name: pubName ?? (d.approvedDoc?.info.title || '') } }));
@@ -51,7 +53,8 @@ export default function Review({ id, me }) {
             <div className="row small muted"><StatusBadge s={d.status} /><span>{d.mode === 'update' ? `Update of ${d.baseRef.processId} (current v${d.baseRef.version})` : `New process ${doc.info.processId}`}</span>
               <span>· recorded by {d.createdBy.name}</span><span>· {d.engine === 'rules' ? 'drafted automatically from the recording' : 'drafted by AI from the recording'}</span></div>
           </div>
-          <button className="btn" onClick={() => download(`/api/drafts/${id}/preview.docx`, `${doc.info.processId}.docx`).catch((e) => setErr(e.message))}>⬇ Word preview</button>
+          <div className="row">{editable && cfg.meetings && <a className="btn" href={`#/meeting/${id}`} data-testid="fill-from-meeting" title="Record a meeting in which the process is explained; the agent suggests what to add">🎙 Fill gaps from a meeting</a>}
+          <button className="btn" onClick={() => download(`/api/drafts/${id}/preview.docx`, `${doc.info.processId}.docx`).catch((e) => setErr(e.message))}>⬇ Word preview</button></div>
         </div>
         {editable && (() => {
           const st = sectionStatus(doc); const req = st.filter((x) => !x.optional); const done = req.filter((x) => x.done).length;
@@ -78,6 +81,7 @@ export default function Review({ id, me }) {
         <button className={tab === 'doc' ? 'active' : ''} onClick={() => setTab('doc')} data-testid="tab-doc">{d.mode === 'update' ? 'Proposed documentation' : 'Generated documentation'}</button>
         <button className={tab === 'clar' ? 'active' : ''} onClick={() => setTab('clar')} data-testid="tab-clar">Clarifications ({openClar.length} open)</button>
         <button className={tab === 'sugg' ? 'active' : ''} onClick={() => setTab('sugg')}>Suggestions ({d.suggestions.length})</button>
+        {d.meetings?.length > 0 && <button className={tab === 'meeting' ? 'active' : ''} onClick={() => setTab('meeting')} data-testid="tab-meeting">From the meeting ({d.meetings.reduce((n, m) => n + m.suggestions.filter((x) => x.status === 'open').length, 0)})</button>}
         <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')} data-testid="tab-preview">Final document preview</button>
       </div>
 
@@ -101,6 +105,7 @@ export default function Review({ id, me }) {
           ))}
         </div>
       )}
+      {tab === 'meeting' && <MeetingPanel d={d} shotUrl={shotUrl} onDecide={decideSuggestion} readOnly={!editable} busy={busy} dirty={dirty} />}
       {tab === 'sugg' && <div className="panel"><h2>Suggested improvements</h2>{d.suggestions.length ? <ul>{d.suggestions.map((s, i) => <li key={i}>{s}</li>)}</ul> : <p className="empty">No suggestions.</p>}<p className="small muted">Suggestions are not added to the document automatically.</p></div>}
       {tab === 'preview' && <div><p className="small muted" style={{ textAlign: 'center' }}>This is the document that will be published{d.mode === 'update' ? ', with your accept / reject decisions applied' : ''}.</p><DocPreview doc={d.publishedDoc || d.approvedDoc || d.mergedDoc || doc} shotUrl={shotUrl} /></div>}
 

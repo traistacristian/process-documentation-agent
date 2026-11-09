@@ -45,6 +45,8 @@ export function loadConfig(overrides = {}) {
   if (env.PDA_AI_DESCRIBE_STEPS) cfg.ai.describeSteps = env.PDA_AI_DESCRIBE_STEPS !== 'false';
   if (env.ANTHROPIC_FOUNDRY_RESOURCE) cfg.ai.foundry = { ...(cfg.ai.foundry || {}), resource: env.ANTHROPIC_FOUNDRY_RESOURCE };
   if (env.PDA_PUBLIC_URL) cfg.publicUrl = env.PDA_PUBLIC_URL;
+  if (env.AZURE_SPEECH_ENDPOINT) cfg.speech = { ...(cfg.speech || {}), endpoint: env.AZURE_SPEECH_ENDPOINT };
+  if (env.AZURE_SPEECH_KEY) cfg.speech = { ...(cfg.speech || {}), key: env.AZURE_SPEECH_KEY };
   if (env.SP_TENANT_ID) cfg.repository.sharepoint.tenantId = env.SP_TENANT_ID;
   if (env.SP_CLIENT_ID) cfg.repository.sharepoint.clientId = env.SP_CLIENT_ID;
   if (env.SP_SITE_URL) cfg.repository.sharepoint.siteUrl = env.SP_SITE_URL;

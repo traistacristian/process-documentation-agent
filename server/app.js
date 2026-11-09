@@ -21,6 +21,7 @@ import { compareDocs, mergeWithDecisions, pendingDecisions, similarity } from '.
 import { normalizeDoc } from './engine/schema.js';
 import { sampleDocs } from './engine/samples.js';
 import { createInviter } from './invite.js';
+import { transcribeAudio, findMeetingSuggestions, nearestFrame, speechConfigured } from './engine/meeting.js';
 import { applyAnswer } from './engine/clarify.js';
 import { renderDocx, renderMarkdown } from './engine/render.js';
 import { createRepository } from './repo/index.js';
@@ -100,6 +101,7 @@ export function createApp(cfg, deps = {}) {
       entra: cfg.auth.mode === 'entra' ? { tenantId: cfg.auth.entra.tenantId, clientId: cfg.auth.entra.spaClientId, scope: cfg.auth.entra.apiScope } : undefined,
       repository: { mode: cfg.repository.mode, label: repo.label },
       aiEngine: engineName(),
+      meetings: meetingsAvailable(),
       categories: cfg.categories,
     });
   });
@@ -171,6 +173,9 @@ export function createApp(cfg, deps = {}) {
   const draftScript = deps.generateScript || generateScript;
   const draftFlow = deps.generateFlow || generateFlow;
   const inviter = createInviter(cfg, { graph: deps.inviteGraph });
+  const transcribe = deps.transcribeAudio || transcribeAudio;
+  const meetingAnalyse = deps.findMeetingSuggestions || findMeetingSuggestions;
+  const meetingsAvailable = () => (!!deps.transcribeAudio || speechConfigured(cfg)) && (!!deps.findMeetingSuggestions || aiAvailable(cfg));
   const scriptCache = new Map(); // processId@version -> script (each draft costs an AI call)
   const privacyJobs = new Map();
   const blurEnabled = () => cfg.capture.blurPersonalData !== false && aiAvailable(cfg);
@@ -432,7 +437,7 @@ export function createApp(cfg, deps = {}) {
     return d;
   };
   const draftView = (d) => {
-    const view = { ...d, pending: d.comparison ? pendingDecisions(d.comparison, d.decisions) : [] };
+    const view = { ...d, meetings: (d.meetings || []).map((m) => { const { transcript, ...rest } = m; return { ...rest, transcriptLines: transcript?.length || 0 }; }), pending: d.comparison ? pendingDecisions(d.comparison, d.decisions) : [] };
     if (d.doc && d.baseDoc && d.comparison) view.mergedDoc = mergeWithDecisions(d.baseDoc, d.doc, d.comparison, d.decisions);
     view.blockers = approvalBlockers(d);
     return view;
@@ -495,6 +500,127 @@ export function createApp(cfg, deps = {}) {
     d.history.push({ ts: Date.now(), user: req.user.name, action: 'saved' });
     store.put('drafts', d);
     audit.write(req.user, 'draft.saved', { draftId: d.id });
+    res.json(draftView(d));
+  }));
+
+  // ---------------------------------------------------------------- meetings that fill a draft's gaps
+  const meetingDir = path.join(cfg.dataDir, 'meetings'); fs.mkdirSync(meetingDir, { recursive: true });
+  const audioPath = (mid) => path.join(meetingDir, `${mid}.webm`);
+  const loadMeeting = (req, d) => {
+    const m = (d.meetings || []).find((x) => x.id === req.params.mid);
+    if (!m) throw httpError(404, 'Meeting not found');
+    return m;
+  };
+  const editableDraft = (req) => {
+    const d = loadDraft(req);
+    if (!['draft', 'rejected'].includes(d.status)) throw httpError(409, `A draft that is ${d.status} cannot be changed`);
+    return d;
+  };
+  const sanitizeMeeting = (m) => { const { transcript, ...rest } = m; return { ...rest, transcriptLines: transcript?.length || 0 }; };
+
+  async function processMeeting(draftId, mid) {
+    const update = (fn) => { const d = store.get('drafts', draftId); const m = d?.meetings?.find((x) => x.id === mid); if (!m) return null; fn(m, d); store.put('drafts', d); return { d, m }; };
+    try {
+      const cur = store.get('drafts', draftId); const lang = cur.doc.info.language || 'en';
+      const transcript = fs.existsSync(audioPath(mid)) && fs.statSync(audioPath(mid)).size > 0 ? await transcribe({ cfg, path: audioPath(mid), language: lang }) : [];
+      update((m) => { m.transcript = transcript; m.status = 'analysing'; });
+      fs.rmSync(audioPath(mid), { force: true }); // privacy: only the transcript is kept
+      const now = store.get('drafts', draftId); const meeting = now.meetings.find((x) => x.id === mid);
+      await Promise.all(meeting.frames.map((f) => Promise.resolve(shotReady(now.sessionId, f.id)).catch(() => {})));
+      const found = transcript.length ? await meetingAnalyse({ cfg, doc: now.doc, clarifications: now.clarifications, transcript }) : [];
+      update((m) => {
+        m.suggestions = found.map((x, i) => {
+          const atMs = Math.max(0, Math.round(x.atSeconds * 1000));
+          const frame = ['answer', 'topic'].includes(x.kind) ? null : nearestFrame(m.frames, atMs);
+          return { id: `sug_${i + 1}`, kind: x.kind, clarificationId: x.clarificationId, stepNumber: x.stepNumber, title: x.title, text: x.text, instructions: x.instructions, quote: x.quote, atMs, screenshotId: frame?.id || null, status: 'open' };
+        });
+        m.status = 'done'; m.finishedAt = Date.now();
+      });
+      audit.write(null, 'meeting.analysed', { draftId, meetingId: mid, suggestions: found.length, transcriptLines: transcript.length });
+    } catch (e) {
+      update((m) => { m.status = 'failed'; m.error = e.message; });
+      fs.rmSync(audioPath(mid), { force: true });
+      audit.write(null, 'meeting.failed', { draftId, meetingId: mid, error: e.message });
+    }
+  }
+
+  app.post('/api/drafts/:id/meetings', wrap(async (req, res) => {
+    const d = editableDraft(req);
+    if (!meetingsAvailable()) throw httpError(409, 'Meeting recordings need Azure AI Speech and the AI to be configured.', 'NOT_AVAILABLE');
+    if (req.body?.consent !== true) throw httpError(400, 'Confirm that everyone in the meeting agreed to the recording');
+    d.meetings ||= [];
+    if (d.meetings.some((m) => m.status === 'recording')) throw httpError(409, 'A meeting is already being recorded for this draft');
+    const m = { id: newId('mtg'), status: 'recording', startedAt: Date.now(), startedBy: req.user.name, frames: [], audioBytes: 0, suggestions: [] };
+    d.meetings.push(m); store.put('drafts', d);
+    audit.write(req.user, 'meeting.started', { draftId: d.id, meetingId: m.id });
+    res.json(sanitizeMeeting(m));
+  }));
+  app.post('/api/drafts/:id/meetings/:mid/audio', express.raw({ type: () => true, limit: '25mb' }), wrap(async (req, res) => {
+    const d = editableDraft(req); const m = loadMeeting(req, d);
+    if (m.status !== 'recording') throw httpError(409, 'The meeting recording has ended');
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (m.audioBytes + buf.length > cfg.meetings.maxAudioMb * 1024 * 1024) throw httpError(413, 'The meeting recording is too long');
+    fs.appendFileSync(audioPath(m.id), buf);
+    m.audioBytes += buf.length; store.put('drafts', d);
+    res.json({ audioBytes: m.audioBytes });
+  }));
+  app.post('/api/drafts/:id/meetings/:mid/frames', wrap(async (req, res) => {
+    const d = editableDraft(req); const m = loadMeeting(req, d);
+    if (m.status !== 'recording') throw httpError(409, 'The meeting recording has ended');
+    if (m.frames.length >= cfg.meetings.maxFrames) throw httpError(429, 'Screenshot limit for this meeting reached');
+    const x = /^data:(image\/(?:jpeg|png));base64,(.+)$/.exec(req.body?.data || '');
+    if (!x) throw httpError(400, 'Expected a data URL with a JPEG or PNG image');
+    const buf = Buffer.from(x[2], 'base64');
+    if (buf.length > 8 * 1024 * 1024) throw httpError(413, 'Screenshot too large');
+    const saved = store.saveScreenshot(d.sessionId, buf, x[1]);
+    protectShot(d.sessionId, saved.id);
+    m.frames.push({ id: saved.id, atMs: Math.max(0, Number(req.body.atMs) || Date.now() - m.startedAt) });
+    store.put('drafts', d);
+    res.json({ id: saved.id, frames: m.frames.length });
+  }));
+  app.post('/api/drafts/:id/meetings/:mid/stop', wrap(async (req, res) => {
+    const d = editableDraft(req); const m = loadMeeting(req, d);
+    if (m.status !== 'recording') throw httpError(409, 'The meeting recording has already ended');
+    m.status = 'transcribing'; m.stoppedAt = Date.now(); store.put('drafts', d);
+    audit.write(req.user, 'meeting.stopped', { draftId: d.id, meetingId: m.id, frames: m.frames.length, audioBytes: m.audioBytes });
+    processMeeting(d.id, m.id);
+    res.json(sanitizeMeeting(m));
+  }));
+  app.post('/api/drafts/:id/meetings/:mid/suggestions/:sid', wrap(async (req, res) => {
+    const d = editableDraft(req); const m = loadMeeting(req, d);
+    const sg = m.suggestions.find((x) => x.id === req.params.sid);
+    if (!sg || sg.status !== 'open') throw httpError(404, 'Suggestion not found or already decided');
+    const action = req.body?.action;
+    if (!['accept', 'reject'].includes(action)) throw httpError(400, 'action must be accept or reject');
+    const text = String(req.body?.text ?? sg.text).trim();
+    if (action === 'accept') {
+      const tag = `meeting ${new Date(m.startedAt).toISOString().slice(0, 10)}`;
+      if (sg.kind === 'topic') {
+        // Accepting a topic only records the decision; the UI offers to start a recording for it.
+      } else if (sg.kind === 'answer') {
+        const c = d.clarifications.find((x) => x.id === sg.clarificationId);
+        if (!c || c.status !== 'open') throw httpError(409, 'This question was already answered');
+        c.answer = text; c.status = 'answered'; applyAnswer(d.doc, c, text);
+      } else if (sg.kind === 'note') {
+        const st = d.doc.steps.find((x) => x.number === sg.stepNumber);
+        if (!st) throw httpError(409, 'The step no longer exists');
+        st.notes.push(text);
+        if (sg.screenshotId && !st.screenshotIds.includes(sg.screenshotId)) st.screenshotIds.push(sg.screenshotId);
+      } else {
+        const at = Math.min(Math.max(0, sg.stepNumber ?? d.doc.steps.length), d.doc.steps.length);
+        d.doc.steps.splice(at, 0, { id: `stp_${crypto.randomBytes(4).toString('hex')}`, number: 0, title: sg.title || text.slice(0, 80), description: text, instructions: sg.instructions || [], application: '', input: '', expectedResult: '', screenshotIds: sg.screenshotId ? [sg.screenshotId] : [], notes: [`Added from the ${tag}.`], warnings: [], important: false, evidenceEventSeqs: [], targets: [] });
+        d.doc.steps.forEach((x, i) => { x.number = i + 1; });
+        // Later suggestions keep pointing at the same steps.
+        for (const o of m.suggestions) if (o !== sg && o.status === 'open' && o.stepNumber != null && o.stepNumber > at) o.stepNumber += 1;
+      }
+      d.doc = normalizeDoc(d.doc);
+      if (d.baseDoc) d.comparison = compareDocs(d.baseDoc, d.doc);
+    }
+    sg.status = action === 'accept' ? 'accepted' : 'rejected'; sg.decidedBy = req.user.name;
+    if (d.status === 'rejected') d.status = 'draft';
+    d.updatedAt = Date.now(); d.history.push({ ts: Date.now(), user: req.user.name, action: `meeting suggestion ${sg.status}` });
+    store.put('drafts', d);
+    audit.write(req.user, `meeting.suggestion_${sg.status}`, { draftId: d.id, meetingId: m.id, kind: sg.kind });
     res.json(draftView(d));
   }));
 
