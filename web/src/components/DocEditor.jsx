@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AuthImg, Lightbox } from '../util.jsx';
+import { AuthImg, Lightbox, MarksHint } from '../util.jsx';
 
 const toLines = (t) => t.split('\n').map((x) => x.trim()).filter(Boolean);
 const LinesField = ({ label, value, onChange, disabled, testid }) => (
@@ -43,7 +43,7 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
   const setStep = (i, k, v) => { const d = structuredClone(doc); d.steps[i][k] = v; onChange(d); };
   const moveStep = (i, dir) => { const d = structuredClone(doc); const [x] = d.steps.splice(i, 1); d.steps.splice(i + dir, 0, x); d.steps.forEach((s, n) => { s.number = n + 1; }); onChange(d); };
   const delStep = (i) => { const d = structuredClone(doc); d.steps.splice(i, 1); d.steps.forEach((s, n) => { s.number = n + 1; }); onChange(d); };
-  const addStep = () => { const d = structuredClone(doc); d.steps.push({ id: `stp_${Math.random().toString(16).slice(2, 10)}`, number: d.steps.length + 1, title: 'New step', description: '', instructions: [], application: '', input: '', expectedResult: '', screenshotIds: [], notes: [], warnings: [], important: false, evidenceEventSeqs: [] }); onChange(d); };
+  const addStep = () => { const d = structuredClone(doc); d.steps.push({ id: `stp_${Math.random().toString(16).slice(2, 10)}`, number: d.steps.length + 1, title: 'New step', description: '', instructions: [], application: '', input: '', expectedResult: '', screenshotIds: [], notes: [], warnings: [], important: false, evidenceEventSeqs: [], targets: [], marks: [] }); onChange(d); };
   const pairs = (key, fields, labels) => (
     <div>
       {doc[key].map((row, i) => (
@@ -90,6 +90,8 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
             <div className="step-head">
               <div className="step-num">{s.number}</div>
               <input value={s.title} disabled={readOnly} onChange={(e) => setStep(i, 'title', e.target.value)} style={{ fontWeight: 600, marginTop: 0 }} data-testid="step-title" />
+              {readOnly ? s.important && <span className="imp-badge">★ Important step</span>
+                : <label className="imp-toggle" title="Highlight this step in the document: a mistake here is costly or hard to undo"><input type="checkbox" checked={!!s.important} onChange={(e) => setStep(i, 'important', e.target.checked)} data-testid="step-important" />★ Important</label>}
               {!readOnly && <div className="row" style={{ flexWrap: 'nowrap' }}>
                 <button className="btn sm" disabled={i === 0} onClick={() => moveStep(i, -1)} title="Move up">↑</button>
                 <button className="btn sm" disabled={i === doc.steps.length - 1} onClick={() => moveStep(i, 1)} title="Move down">↓</button>
@@ -110,6 +112,7 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
             {s.screenshotIds.length > 0 && <div className="shots">{s.screenshotIds.map((id) => (
               <figure key={id}><AuthImg src={shotUrl(id)} alt={`Step ${s.number}`} onClick={setZoom} />{!readOnly && <button className="btn sm" title="Remove screenshot" onClick={() => setStep(i, 'screenshotIds', s.screenshotIds.filter((x) => x !== id))}>✕</button>}</figure>
             ))}</div>}
+            <MarksHint step={s} />
             <p className="small muted" style={{ marginBottom: 0 }}>{s.evidenceEventSeqs.length ? `Based on ${s.evidenceEventSeqs.length} recorded action(s).` : 'Added manually – not based on recorded actions.'}</p>
           </div>
         ))}

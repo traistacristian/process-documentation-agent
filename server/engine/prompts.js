@@ -14,7 +14,8 @@ How to work:
 7. Attach screenshots to the steps they illustrate using their ids; only use ids you were given, and only where the screenshot genuinely helps.
 8. Suggestions are optional recommendations to improve the process or the documentation (for example a missing verification step or an automation opportunity). Keep them separate from the documented steps.
 9. When an existing approved document is provided, this is an update. Reuse the existing wording, step titles and terminology for every step that was performed the same way, so that the comparison shows only real changes. Keep existing purpose, scope, roles, prerequisites and troubleshooting unless the new recording contradicts them; raise a clarification when it does.
-10. Write the whole document in the language named in <document_language> (British English or German). Keep the names of menus, buttons and fields exactly as captured, even when they are in another language.`;
+10. Set important to true for every step the employee marked as important, and for steps where a mistake is costly or hard to undo: deleting, removing, resetting, blocking or disabling something, granting or revoking permissions or admin roles, and checks that must pass before continuing (such as verifying the caller's identity or an approval). Leave it false for routine navigation and data entry, so the highlight stays meaningful.
+11. Write the whole document in the language named in <document_language> (British English or German). Keep the names of menus, buttons and fields exactly as captured, even when they are in another language.`;
 
 export function buildUserPrompt({ meta, candidateSteps, events, screenshots, base }) {
   const lines = [];

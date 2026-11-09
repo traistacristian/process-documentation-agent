@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AuthImg, Lightbox, fmtDate } from '../util.jsx';
+import { AuthImg, Lightbox, fmtDate, MarksHint } from '../util.jsx';
 
 const List = ({ items }) => (items?.length ? <ul>{items.map((x, i) => <li key={i}>{x}</li>)}</ul> : <p className="empty">To be confirmed.</p>);
 
@@ -33,13 +33,14 @@ export default function DocPreview({ doc, shotUrl }) {
       <h2>6. Process Execution – Step by Step</h2>
       {doc.steps.map((s) => (
         <div key={s.id} className={`step ${s.important ? 'important' : ''}`}>
-          <div className="step-head"><div className="step-num">{s.number}</div><h3 style={{ margin: 0 }}>{s.title}</h3></div>
+          <div className="step-head"><div className="step-num">{s.number}</div><h3 style={{ margin: 0 }}>{s.title}</h3>{s.important && <span className="imp-badge" title="A mistake here is costly or hard to undo">★ Important step</span>}</div>
           {s.description && <p>{s.description}</p>}
           <ol>{s.instructions.map((x, k) => <li key={k}>{x}</li>)}</ol>
           <div className="kv small"><div>Application / system</div><div>{s.application || '–'}</div><div>Required input</div><div>{s.input || '–'}</div><div>Expected result</div><div>{s.expectedResult || 'To be confirmed.'}</div></div>
           {s.notes.map((n, k) => <p key={k} className="small"><b>Note:</b> {n}</p>)}
           {s.warnings.map((w, k) => <p key={k} className="warn-line">⚠ {w}</p>)}
           {shotUrl && s.screenshotIds.length > 0 && <div className="shots">{s.screenshotIds.map((id) => <figure key={id}><AuthImg src={shotUrl(id)} alt={`Step ${s.number}`} onClick={setZoom} /></figure>)}</div>}
+          {shotUrl && <MarksHint step={s} />}
         </div>
       ))}
       <h2>7. Decision Points and Exceptions</h2>

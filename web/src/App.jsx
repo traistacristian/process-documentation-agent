@@ -102,10 +102,38 @@ function SignedOut() {
   );
 }
 
+// Pages visited in this tab, so Back returns to the previous page of the app (not to another site).
+const visited = [location.hash.slice(1) || '/'];
+addEventListener('hashchange', () => {
+  const h = location.hash.slice(1) || '/';
+  if (visited.length > 1 && visited[visited.length - 2] === h) visited.pop(); else if (visited[visited.length - 1] !== h) visited.push(h);
+});
+
 function useHash() {
   const [h, setH] = useState(location.hash.slice(1) || '/');
   useEffect(() => { const f = () => { setH(location.hash.slice(1) || '/'); window.scrollTo(0, 0); }; addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
   return h;
+}
+
+// Where Back goes when the page was opened directly (a link or a reload): the page one level up.
+function parentOf(page, id) {
+  if (page === 'library' && id) return '#/library';
+  if (page === 'meeting' && id) return `#/review/${id}`;
+  if (page === 'update' && id) return '#/update';
+  return '#/';
+}
+
+const PAGE_NAMES = { new: 'Record a new process', update: 'Update a process', record: 'Recording', review: 'Review the draft', library: 'Process library', admin: 'Administration', help: 'Help', meeting: 'Meeting recording' };
+
+function BackBar({ page, id }) {
+  const back = () => { if (visited.length > 1) history.back(); else location.hash = parentOf(page, id); };
+  return (
+    <nav className="backbar" aria-label="Page navigation">
+      <button className="btn sm" onClick={back} data-testid="back">← Back</button>
+      <a className="btn sm" href="#/" data-testid="home">⌂ Home</a>
+      <span className="crumbs small muted"><a href="#/">Home</a>{page === 'library' && id ? <> / <a href="#/library">Process library</a> / {id}</> : page === 'update' && id ? <> / <a href="#/update">Update a process</a> / {id}</> : page === 'meeting' && id ? <> / <a href={`#/review/${id}`}>Review the draft</a> / Meeting recording</> : <> / {PAGE_NAMES[page] || 'Page'}</>}</span>
+    </nav>
+  );
 }
 
 export default function App() {
@@ -157,7 +185,7 @@ export default function App() {
         ) : null}
         <AccountMenu me={me} />
       </header>
-      <main>{view}</main>
+      <main>{page && <BackBar page={page} id={id} />}{view}</main>
     </>
   );
 }

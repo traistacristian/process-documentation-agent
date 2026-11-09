@@ -85,7 +85,7 @@ export function sampleDocs({ user, newProcessId }) {
   return SAMPLES.map(({ title, department, owner, steps, ...rest }) => normalizeDoc({
     ...rest,
     info: { processId: newProcessId(), title, version: '1.0', createdAt: now, updatedAt: now, owner, department, category: 'Sample', author: user.name, approver: user.name, status: 'Published', language: 'en', fileName: title.replace(/[^\w .-]/g, '') },
-    steps: steps.map((s, i) => ({ ...s, id: `stp_sample_${i + 1}`, number: i + 1, screenshotIds: [], evidenceEventSeqs: [], targets: [] })),
+    steps: steps.map((s, i) => ({ ...s, id: `stp_sample_${i + 1}`, number: i + 1, screenshotIds: [], evidenceEventSeqs: [], targets: [], marks: [] })),
     related: [], changeHistory: [{ version: '1.0', date: now, author: user.name, approver: user.name, summary: 'Sample process for demonstrations' }],
   }));
 }

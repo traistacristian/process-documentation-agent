@@ -2,7 +2,8 @@
 // Markdown (used for previews and the plain-text copy kept next to the Word file).
 // Fixed texts follow the document language (English or German).
 import fs from 'node:fs';
-import { Document, Packer, Paragraph, HeadingLevel, TextRun, Table, TableRow, TableCell, WidthType, ImageRun, AlignmentType, BorderStyle, Header, Footer, PageNumber } from 'docx';
+import { Document, Packer, Paragraph, HeadingLevel, TextRun, Table, TableRow, TableCell, WidthType, ImageRun, AlignmentType, BorderStyle, Header, Footer, PageNumber, ShadingType } from 'docx';
+import { annotateImage } from './annotate.js';
 
 const LABELS = {
   en: {
@@ -11,7 +12,7 @@ const LABELS = {
     prereq: { permissions: 'Required permissions', access: 'Required access', systems: 'Applications and systems', information: 'Required information', dependencies: 'Dependencies' },
     info: ['Process title', 'Process ID', 'Version', 'Creation date', 'Last updated', 'Process owner', 'Responsible department', 'Category', 'Author', 'Reviewer / approver', 'Status'],
     step: 'Step', app: 'Application / system', input: 'Required input', result: 'Expected result', screenshot: 'Screenshot', note: 'Note', warning: 'Warning',
-    figure: 'Figure', notAvailable: 'not available', noDecisions: 'No decision points recorded.', ifThen: (c, a) => `If ${c}, then ${a}`, stepRef: (n) => `step ${n}`,
+    figure: 'Figure', notAvailable: 'not available', important: 'IMPORTANT STEP', importantHint: 'Take extra care: this step is critical for the process.', marksHint: 'The numbers show the order of the clicks; frames show the fields to fill in.', noDecisions: 'No decision points recorded.', ifThen: (c, a) => `If ${c}, then ${a}`, stepRef: (n) => `step ${n}`,
     exc: ['Problem', 'Handling / recovery', 'Escalation'], noIssues: 'No known issues recorded.', issue: ['Issue', 'Resolution'], none: 'None.',
     role: ['Role', 'Responsibilities'], history: ['Version', 'Date', 'Author', 'Approver', 'Summary'], subtitle: 'IT Process Documentation', eyebrow: 'IT WORK INSTRUCTION', page: 'Page', of: 'of', steps: 'Steps',
   },
@@ -21,7 +22,7 @@ const LABELS = {
     prereq: { permissions: 'Erforderliche Berechtigungen', access: 'Erforderliche Zugänge', systems: 'Anwendungen und Systeme', information: 'Erforderliche Informationen', dependencies: 'Abhängigkeiten' },
     info: ['Prozesstitel', 'Prozess-ID', 'Version', 'Erstellt am', 'Zuletzt aktualisiert', 'Prozessverantwortlich', 'Zuständige Abteilung', 'Kategorie', 'Autor', 'Prüfer / Freigabe', 'Status'],
     step: 'Schritt', app: 'Anwendung / System', input: 'Erforderliche Eingabe', result: 'Erwartetes Ergebnis', screenshot: 'Screenshot', note: 'Hinweis', warning: 'Warnung',
-    figure: 'Abbildung', notAvailable: 'nicht verfügbar', noDecisions: 'Keine Entscheidungspunkte erfasst.', ifThen: (c, a) => `Wenn ${c}, dann ${a}`, stepRef: (n) => `Schritt ${n}`,
+    figure: 'Abbildung', notAvailable: 'nicht verfügbar', important: 'WICHTIGER SCHRITT', importantHint: 'Bitte besonders sorgfältig ausführen: Dieser Schritt ist entscheidend für den Prozess.', marksHint: 'Die Zahlen zeigen die Reihenfolge der Klicks, Rahmen die auszufüllenden Felder.', noDecisions: 'Keine Entscheidungspunkte erfasst.', ifThen: (c, a) => `Wenn ${c}, dann ${a}`, stepRef: (n) => `Schritt ${n}`,
     exc: ['Problem', 'Behandlung / Wiederherstellung', 'Eskalation'], noIssues: 'Keine bekannten Probleme erfasst.', issue: ['Problem', 'Lösung'], none: 'Keine.',
     role: ['Rolle', 'Verantwortlichkeiten'], history: ['Version', 'Datum', 'Autor', 'Freigabe', 'Zusammenfassung'], subtitle: 'IT-Prozessdokumentation', eyebrow: 'IT-ARBEITSANWEISUNG', page: 'Seite', of: 'von', steps: 'Schritte',
   },
@@ -46,7 +47,8 @@ export function renderMarkdown(d) {
   L.push(`## 5. ${SECTIONS[4]}`, '', d.roles.length ? d.roles.map((r) => `- **${r.role}**: ${r.responsibilities}`).join('\n') : `_${TBD}_`, '');
   L.push(`## 6. ${SECTIONS[5]}`, '');
   for (const s of d.steps) {
-    L.push(`### ${T.step} ${s.number} – ${s.title}`, '');
+    L.push(`### ${s.important ? '★ ' : ''}${T.step} ${s.number} – ${s.title}`, '');
+    if (s.important) L.push(`> **${T.important}** – ${T.importantHint}`, '');
     if (s.description) L.push(s.description, '');
     s.instructions.forEach((x, i) => L.push(`${i + 1}. ${x}`));
     L.push('', `- **${T.app}:** ${s.application || '–'}`, `- **${T.input}:** ${s.input || '–'}`, `- **${T.result}:** ${s.expectedResult || TBD}`);
@@ -117,17 +119,26 @@ export async function renderDocx(d, resolveShot = () => null) {
   children.push(H(`5. ${SECTIONS[4]}`), d.roles.length ? table(d.roles.map((r) => [r.role, r.responsibilities]), T.role) : P(TBD, { italics: true }));
   children.push(H(`6. ${SECTIONS[5]}`));
   for (const s of d.steps) {
-    children.push(H(`${T.step} ${s.number} – ${s.title}`, HeadingLevel.HEADING_2));
+    children.push(H(`${s.important ? '★ ' : ''}${T.step} ${s.number} – ${s.title}`, HeadingLevel.HEADING_2));
+    if (s.important) {
+      children.push(new Paragraph({
+        children: [new TextRun({ text: `${T.important}  `, bold: true, color: 'B54708', size: 18 }), new TextRun({ text: T.importantHint, color: '7A2E0E', size: 18 })],
+        shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'FFF4E5' },
+        border: { left: { style: BorderStyle.SINGLE, size: 24, color: 'E8590C', space: 6 } },
+        spacing: { before: 60, after: 120 },
+      }));
+    }
     if (s.description) children.push(P(s.description));
     s.instructions.forEach((x, i) => children.push(new Paragraph({ children: [new TextRun({ text: `${i + 1}. `, bold: true }), new TextRun(x)], indent: { left: 360 }, spacing: { after: 60 } })));
     children.push(table([[T.app, s.application || '–'], [T.input, s.input || '–'], [T.result, s.expectedResult || TBD]]));
     for (const id of s.screenshotIds) {
       const p = resolveShot(id);
       if (!p || !fs.existsSync(p)) { children.push(P(`[${T.screenshot} ${id} ${T.notAvailable}]`, { italics: true })); continue; }
-      const buf = fs.readFileSync(p); const { w, h, type } = imageSize(buf);
+      const marks = (s.marks || []).filter((m) => m.shotId === id);
+      const buf = await annotateImage(fs.readFileSync(p), marks).catch(() => fs.readFileSync(p)); const { w, h, type } = imageSize(buf);
       const width = Math.min(600, w); const height = Math.round((h / w) * width);
       children.push(new Paragraph({ children: [new ImageRun({ data: buf, type, transformation: { width, height } })], alignment: AlignmentType.CENTER, spacing: { before: 120, after: 60 } }));
-      children.push(new Paragraph({ children: [new TextRun({ text: `${T.figure}: ${T.step} ${s.number} – ${s.title}`, italics: true, size: 18, color: '5B6B80' })], alignment: AlignmentType.CENTER }));
+      children.push(new Paragraph({ children: [new TextRun({ text: `${T.figure}: ${T.step} ${s.number} – ${s.title}${marks.length ? ` · ${T.marksHint}` : ''}`, italics: true, size: 18, color: '5B6B80' })], alignment: AlignmentType.CENTER }));
     }
     for (const n of s.notes) children.push(P(`${T.note}: ${n}`));
     for (const w of s.warnings) children.push(new Paragraph({ children: [new TextRun({ text: `⚠ ${w}`, color: '9A5B00' })] }));

@@ -24,6 +24,9 @@ h1 { font-size: 26px; } h2 { font-size: 18px; } h3 { font-size: 15px; }
 .rec-pill { background: var(--rec); color: #fff; padding: 4px 10px; border-radius: 99px; font-weight: 600; font-size: 12px; animation: pulse 1.6s infinite; text-decoration: none; }
 @keyframes pulse { 50% { opacity: .65; } }
 main { max-width: 1180px; margin: 0 auto; padding: 24px; }
+.backbar { display: flex; align-items: center; gap: 8px; margin: -8px 0 16px; flex-wrap: wrap; }
+.backbar .crumbs { margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.backbar .crumbs a { color: inherit; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 20px; margin-bottom: 16px; }
 .grid { display: grid; gap: 16px; }
 .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } .g5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
@@ -84,7 +87,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand-soft)
 .tabs button { font: inherit; background: none; border: 0; padding: 10px 14px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; }
 .tabs button.active { color: var(--brand); border-bottom-color: var(--brand); }
 .step { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #fff; }
-.step.important { border-left: 4px solid #e8590c; }
+.step.important { border-left: 5px solid #e8590c; background: linear-gradient(90deg, #fff6ee, #fff 220px); box-shadow: 0 1px 0 rgba(232,89,12,.08); }
+.step.important .step-num { background: #e8590c; }
+.imp-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: #fff0e3; color: #b54708; border: 1px solid #f9c9a4; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
+.imp-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted, #5b6b80); white-space: nowrap; cursor: pointer; }
+.imp-toggle input { width: auto; margin: 0; }
+.marks-hint { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; }
+.marks-hint .dot { width: 16px; height: 16px; border-radius: 50%; background: #2fa84f; color: #fff; font-size: 10px; font-weight: 700; display: inline-grid; place-items: center; flex: none; }
 .step-head { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
 .step-num { width: 30px; height: 30px; border-radius: 50%; background: var(--brand); color: #fff; display: grid; place-items: center; font-weight: 700; flex: none; }
 .shots { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }

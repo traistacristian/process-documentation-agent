@@ -21,6 +21,8 @@ export const StepSchema = z.object({
   evidenceEventSeqs: z.array(z.number().int()),
   // What to click in this step (from the recording), used by guided mode to highlight it.
   targets: z.array(z.object({ role: str, name: str, url: str })),
+  // Numbered click markers on the step's screenshots (positions as fractions of the image).
+  marks: z.array(z.object({ shotId: str, n: z.number().int(), kind: z.enum(['click', 'field']), x: z.number(), y: z.number(), w: z.number(), h: z.number(), cx: z.number(), cy: z.number() })),
 });
 
 export const DocSchema = z.object({
@@ -61,7 +63,7 @@ export function emptyDoc(info = {}) {
 }
 
 export function emptyStep(n) {
-  return { id: `step_${n}`, number: n, title: '', description: '', instructions: [], application: '', input: '', expectedResult: '', screenshotIds: [], notes: [], warnings: [], important: false, evidenceEventSeqs: [], targets: [] };
+  return { id: `step_${n}`, number: n, title: '', description: '', instructions: [], application: '', input: '', expectedResult: '', screenshotIds: [], notes: [], warnings: [], important: false, evidenceEventSeqs: [], targets: [], marks: [] };
 }
 
 // Coerces a possibly partial object (e.g. hand-edited in the UI) into a valid document.

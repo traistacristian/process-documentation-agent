@@ -118,6 +118,9 @@ test('new process: capture real browser activity, generate, review, approve and 
   assert.match(text, /Click "Save"/);
   assert.match(text, /Changes saved successfully/);
   assert.ok(d.doc.steps.some((s) => s.screenshotIds.length), 'screenshots are attached to steps');
+  const marks = d.doc.steps.flatMap((s) => s.marks || []);
+  assert.ok(marks.length > 0, 'clicks are numbered on the step screenshots');
+  assert.ok(d.doc.steps.every((s) => (s.marks || []).every((m, i) => m.n === i + 1 && s.screenshotIds.includes(m.shotId))), 'markers are numbered in order on the step\'s own screenshots');
   assert.ok(d.clarifications.some((c) => c.section === 'purpose'), 'missing purpose is asked, not invented');
   assert.ok(d.blockers.length > 0, 'cannot approve with open clarifications');
   await app.getByTestId('tab-doc').click();

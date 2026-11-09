@@ -14,6 +14,7 @@ import { applyStepDescriptions, findDescription } from './engine/describe.js';
 import { describeStepWithClaude, aiDescribeEnabled } from './engine/describe-ai.js';
 import { protectScreenshot } from './engine/privacy.js';
 import { attachTargets } from './engine/targets.js';
+import { attachMarks, marksFor, annotateImage } from './engine/annotate.js';
 import { translateDoc, otherLanguages } from './engine/translate.js';
 import { generateScript } from './engine/script.js';
 import { generateFlow, flowToMarkdown } from './engine/flow.js';
@@ -232,10 +233,21 @@ export function createApp(cfg, deps = {}) {
     audit.write(req.user, `process.${kind}_drafted`, { processId: key, automatable: out.automatable });
     res.json(out);
   }));
+  // Published screenshots are shown with the step's numbered click markers (?raw=1: without).
+  const publishedDocs = new Map(); // processId -> { at, doc }: avoids reading process.json for every image
+  const publishedDoc = async (pid) => {
+    const hit = publishedDocs.get(pid);
+    if (hit && Date.now() - hit.at < 60_000) return hit.doc;
+    const doc = (await repo.get(pid).catch(() => null))?.doc || null;
+    publishedDocs.set(pid, { at: Date.now(), doc });
+    if (publishedDocs.size > 200) publishedDocs.delete(publishedDocs.keys().next().value);
+    return doc;
+  };
   app.get('/api/processes/:pid/screenshots/:shot', wrap(async (req, res) => {
     const s = await repo.screenshot(req.params.pid, req.params.shot);
     if (!s) return res.status(404).end();
-    res.type(s.mime).send(s.buffer);
+    const marks = req.query.raw ? [] : marksFor(await publishedDoc(req.params.pid), req.params.shot);
+    res.type(s.mime).send(marks.length ? await annotateImage(s.buffer, marks) : s.buffer);
   }));
   app.get('/api/repository/processes/:pid/:file', wrap(async (req, res) => {
     const buf = await repo.file(req.params.pid, req.params.file);
@@ -411,6 +423,7 @@ export function createApp(cfg, deps = {}) {
       doc.info.language = s.meta.language === 'de' ? 'de' : 'en';
       doc.info.fileName = s.meta.fileName || s.baseRef?.doc?.info?.fileName || '';
       attachTargets(doc, events);
+      attachMarks(doc, events);
       if (s.mode === 'new') {
         doc.info.processId = `PRC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
         doc.info.version = '0.1'; doc.info.createdAt = new Date().toISOString();
@@ -608,7 +621,7 @@ export function createApp(cfg, deps = {}) {
         if (sg.screenshotId && !st.screenshotIds.includes(sg.screenshotId)) st.screenshotIds.push(sg.screenshotId);
       } else {
         const at = Math.min(Math.max(0, sg.stepNumber ?? d.doc.steps.length), d.doc.steps.length);
-        d.doc.steps.splice(at, 0, { id: `stp_${crypto.randomBytes(4).toString('hex')}`, number: 0, title: sg.title || text.slice(0, 80), description: text, instructions: sg.instructions || [], application: '', input: '', expectedResult: '', screenshotIds: sg.screenshotId ? [sg.screenshotId] : [], notes: [`Added from the ${tag}.`], warnings: [], important: false, evidenceEventSeqs: [], targets: [] });
+        d.doc.steps.splice(at, 0, { id: `stp_${crypto.randomBytes(4).toString('hex')}`, number: 0, title: sg.title || text.slice(0, 80), description: text, instructions: sg.instructions || [], application: '', input: '', expectedResult: '', screenshotIds: sg.screenshotId ? [sg.screenshotId] : [], notes: [`Added from the ${tag}.`], warnings: [], important: false, evidenceEventSeqs: [], targets: [], marks: [] });
         d.doc.steps.forEach((x, i) => { x.number = i + 1; });
         // Later suggestions keep pointing at the same steps.
         for (const o of m.suggestions) if (o !== sg && o.status === 'open' && o.stepNumber != null && o.stepNumber > at) o.stepNumber += 1;
@@ -725,10 +738,11 @@ export function createApp(cfg, deps = {}) {
     const d = loadDraft(req);
     await shotReady(d.sessionId, req.params.shot);
     const p = store.screenshotPath(d.sessionId, req.params.shot);
-    if (p) return res.sendFile(p);
-    const got = d.baseRef ? await repo.screenshot(d.baseRef.processId, req.params.shot) : null;
+    const marks = req.query.raw ? [] : marksFor(d.doc, req.params.shot);
+    if (p && !marks.length) return res.sendFile(p);
+    const got = p ? { buffer: fs.readFileSync(p), mime: p.endsWith('.png') ? 'image/png' : 'image/jpeg' } : d.baseRef ? await repo.screenshot(d.baseRef.processId, req.params.shot) : null;
     if (!got) return res.status(404).end();
-    res.type(got.mime).send(got.buffer);
+    res.type(got.mime).send(marks.length ? await annotateImage(got.buffer, marks) : got.buffer);
   }));
 
   // ---------------------------------------------------------------- dashboard
