@@ -67,6 +67,20 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          # Meeting transcription needs the Microsoft.CognitiveServices provider on the subscription.
+          # Try to register it; if the deploy identity may not, deploy without Speech for now.
+          speech="${{ env.SPEECH_ENABLED }}"
+          if [ "$speech" = "true" ]; then
+            state=$(az provider show -n Microsoft.CognitiveServices --query registrationState -o tsv 2>/dev/null || echo unknown)
+            if [ "$state" != "Registered" ]; then
+              az provider register -n Microsoft.CognitiveServices --wait >/dev/null 2>&1 || true
+              state=$(az provider show -n Microsoft.CognitiveServices --query registrationState -o tsv 2>/dev/null || echo unknown)
+            fi
+            if [ "$state" != "Registered" ]; then
+              echo "::warning::Microsoft.CognitiveServices is not registered on the subscription ($state), so meeting transcription is skipped. Run once in Cloud Shell: az provider register --namespace Microsoft.CognitiveServices — the next deploy adds Speech."
+              speech=false
+            fi
+          fi
           out=$(az deployment group create -g "${{ env.AZURE_RESOURCE_GROUP }}" -f infra/main.bicep \
             -p location="${{ env.AZURE_LOCATION }}" costProfile="${{ env.COST_PROFILE }}" budgetAlertEmail="${{ env.BUDGET_ALERT_EMAIL }}" \
                sharePointSiteUrl="${{ env.SHAREPOINT_SITE_URL }}" \
@@ -76,7 +90,7 @@ jobs:
                foundryResourceName="${{ env.FOUNDRY_RESOURCE_NAME }}" \
                entraApiClientId="${{ env.ENTRA_API_CLIENT_ID }}" \
                entraSpaClientId="${{ env.ENTRA_SPA_CLIENT_ID }}" \
-               enableSpeech="${{ env.SPEECH_ENABLED }}" speechSku="${{ env.SPEECH_SKU }}" \
+               enableSpeech="$speech" speechSku="${{ env.SPEECH_SKU }}" \
             --query properties.outputs -o json)
           echo "webApp=$(echo "$out" | jq -r .webAppName.value)" >> "$GITHUB_OUTPUT"
           echo "url=$(echo "$out" | jq -r .url.value)" >> "$GITHUB_OUTPUT"
