@@ -23,6 +23,8 @@ export const StepSchema = z.object({
   targets: z.array(z.object({ role: str, name: str, url: str })),
   // Numbered click markers on the step's screenshots (positions as fractions of the image).
   marks: z.array(z.object({ shotId: str, n: z.number().int(), kind: z.enum(['click', 'field']), x: z.number(), y: z.number(), w: z.number(), h: z.number(), cx: z.number(), cy: z.number() })),
+  // Part of a screenshot to show (fractions of the image); the stored screenshot stays complete.
+  crops: z.array(z.object({ shotId: str, x: z.number(), y: z.number(), w: z.number(), h: z.number() })),
 });
 
 export const DocSchema = z.object({
@@ -65,7 +67,7 @@ export function emptyDoc(info = {}) {
 }
 
 export function emptyStep(n) {
-  return { id: `step_${n}`, number: n, title: '', description: '', instructions: [], application: '', input: '', expectedResult: '', screenshotIds: [], notes: [], warnings: [], important: false, evidenceEventSeqs: [], targets: [], marks: [] };
+  return { id: `step_${n}`, number: n, title: '', description: '', instructions: [], application: '', input: '', expectedResult: '', screenshotIds: [], notes: [], warnings: [], important: false, evidenceEventSeqs: [], targets: [], marks: [], crops: [] };
 }
 
 // Coerces a possibly partial object (e.g. hand-edited in the UI) into a valid document.

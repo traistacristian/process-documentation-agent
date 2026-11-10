@@ -3,7 +3,7 @@
 // Fixed texts follow the document language (English or German).
 import fs from 'node:fs';
 import { Document, Packer, Paragraph, HeadingLevel, TextRun, Table, TableRow, TableCell, WidthType, ImageRun, AlignmentType, BorderStyle, Header, Footer, PageNumber, ShadingType } from 'docx';
-import { annotateImage } from './annotate.js';
+import { renderShot } from './annotate.js';
 
 const LABELS = {
   en: {
@@ -135,7 +135,8 @@ export async function renderDocx(d, resolveShot = () => null) {
       const p = resolveShot(id);
       if (!p || !fs.existsSync(p)) { children.push(P(`[${T.screenshot} ${id} ${T.notAvailable}]`, { italics: true })); continue; }
       const marks = (s.marks || []).filter((m) => m.shotId === id);
-      const buf = await annotateImage(fs.readFileSync(p), marks).catch(() => fs.readFileSync(p)); const { w, h, type } = imageSize(buf);
+      const crop = (s.crops || []).find((c) => c.shotId === id) || null;
+      const buf = await renderShot(fs.readFileSync(p), marks, crop).catch(() => fs.readFileSync(p)); const { w, h, type } = imageSize(buf);
       const width = Math.min(600, w); const height = Math.round((h / w) * width);
       children.push(new Paragraph({ children: [new ImageRun({ data: buf, type, transformation: { width, height } })], alignment: AlignmentType.CENTER, spacing: { before: 120, after: 60 } }));
       children.push(new Paragraph({ children: [new TextRun({ text: `${T.figure}: ${T.step} ${s.number} – ${s.title}${marks.length ? ` · ${T.marksHint}` : ''}`, italics: true, size: 18, color: '5B6B80' })], alignment: AlignmentType.CENTER }));

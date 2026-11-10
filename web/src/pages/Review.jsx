@@ -86,7 +86,7 @@ export default function Review({ id, me }) {
       </div>
 
       {tab === 'changes' && d.comparison && <div className="panel"><DiffView baseDoc={d.baseDoc} doc={d.doc} comparison={d.comparison} decisions={d.decisions} onDecide={decide} onDecideAll={decideAll} readOnly={!editable || busy} /></div>}
-      {tab === 'doc' && <DocEditor doc={doc} onChange={(x) => { setDoc(x); setDirty(true); }} shotUrl={shotUrl} readOnly={!editable} />}
+      {tab === 'doc' && <DocEditor doc={doc} onChange={(x) => { setDoc(x); setDirty(true); }} shotUrl={shotUrl} readOnly={!editable} suggestMarks={getConfig()?.aiEngine !== 'rules' ? (shotId, instructions) => api(`/api/drafts/${id}/locate-marks`, { method: 'POST', body: { shotId, instructions } }) : null} />}
       {tab === 'clar' && (
         <div className="panel">
           <h2>Missing information</h2>

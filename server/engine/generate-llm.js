@@ -14,7 +14,7 @@ import { SYSTEM_PROMPT, buildUserPrompt } from './prompts.js';
 import { generateWithRules } from './generate-rules.js';
 import { extractKeywords, normalizeKeywords } from './keywords.js';
 
-const LlmStep = DocSchema.shape.steps.element.omit({ id: true, number: true, targets: true, marks: true });
+const LlmStep = DocSchema.shape.steps.element.omit({ id: true, number: true, targets: true, marks: true, crops: true });
 const LlmOutput = z.object({
   doc: DocSchema.omit({ info: true, changeHistory: true, steps: true }).extend({ steps: z.array(LlmStep) }),
   clarifications: z.array(z.object({ section: z.string(), stepNumber: z.number().int().nullable(), question: z.string() })),
