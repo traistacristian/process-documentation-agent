@@ -184,6 +184,12 @@ foreach ($c in 'PDA_ProcessId', 'PDA_Version', 'PDA_Status', 'PDA_Owner', 'PDA_D
   } | ConvertTo-Json) | Out-Null
   Ok "Column $c"
 }
+if (-not ($cols -contains 'PDA_Keywords')) {
+  Invoke-MgGraphRequest POST "https://graph.microsoft.com/v1.0/sites/$($site.id)/lists/$($list.id)/columns" -Body (@{
+    name = 'PDA_Keywords'; displayName = 'Process Keywords'; text = @{ allowMultipleLines = $true; linesForEditing = 3 }
+  } | ConvertTo-Json -Depth 3) | Out-Null
+  Ok "Column PDA_Keywords"
+}
 try { Invoke-MgGraphRequest GET "https://graph.microsoft.com/v1.0/drives/$($drive.id)/root:/$([uri]::EscapeDataString($RootFolder))" | Out-Null; Ok "Folder '$RootFolder' exists" }
 catch {
   Invoke-MgGraphRequest POST "https://graph.microsoft.com/v1.0/drives/$($drive.id)/root/children" -Body (@{ name = $RootFolder; folder = @{}; '@microsoft.graph.conflictBehavior' = 'fail' } | ConvertTo-Json) | Out-Null

@@ -14,6 +14,8 @@ import { applyStepDescriptions, findDescription } from './engine/describe.js';
 import { describeStepWithClaude, aiDescribeEnabled } from './engine/describe-ai.js';
 import { protectScreenshot } from './engine/privacy.js';
 import { attachTargets } from './engine/targets.js';
+import { SearchIndex } from './search.js';
+import { extractKeywords, normalizeKeywords } from './engine/keywords.js';
 import { attachMarks, marksFor, annotateImage } from './engine/annotate.js';
 import { translateDoc, otherLanguages } from './engine/translate.js';
 import { generateScript } from './engine/script.js';
@@ -38,6 +40,7 @@ export function createApp(cfg, deps = {}) {
   const store = deps.store || new Store(cfg.dataDir);
   const audit = deps.audit || new AuditLog(cfg.dataDir);
   const repo = deps.repo || createRepository(cfg, deps.repoDeps);
+  const searchIndex = deps.searchIndex || new SearchIndex({ repo, dataDir: cfg.dataDir, log: (what, msg) => audit.write(null, what, { error: msg }) });
   const { authenticate, requireRole } = createAuth(cfg);
   const generators = { rules: generateWithRules, claude: deps.generateWithClaude || generateWithClaude };
   const app = express();
@@ -205,7 +208,17 @@ export function createApp(cfg, deps = {}) {
 
   // ---------------------------------------------------------------- repository
   app.get('/api/repository/status', wrap(async (req, res) => res.json(await repo.status())));
-  app.get('/api/processes', wrap(async (req, res) => res.json(await repo.search(req.query.q))));
+  // Search: the full-text index over every published process (falls back to the plain listing filter
+  // when the index cannot be refreshed, e.g. SharePoint is briefly unreachable and nothing is cached).
+  app.get('/api/processes', wrap(async (req, res) => {
+    const q = String(req.query.q || '').slice(0, 200);
+    try { await searchIndex.refresh(); } catch (e) { if (!searchIndex.list().length) return res.json(await repo.search(q)); }
+    res.json(searchIndex.search(q));
+  }));
+  app.get('/api/processes/keywords', wrap(async (req, res) => {
+    try { await searchIndex.refresh(); } catch { /* serve what is indexed */ }
+    res.json(searchIndex.keywords());
+  }));
   app.get('/api/processes/duplicates', wrap(async (req, res) => {
     const title = String(req.query.title || '');
     const all = await repo.list();
@@ -493,7 +506,11 @@ export function createApp(cfg, deps = {}) {
     const b = req.body || {};
     if (b.baseUpdatedAt && b.baseUpdatedAt !== d.updatedAt) throw httpError(409, 'This draft was changed by someone else. Reload it before saving.', 'CONFLICT');
     if (b.doc) {
-      const doc = normalizeDoc(b.doc);
+      let doc;
+      try { doc = normalizeDoc(b.doc); } catch (e) {
+        const where = e.issues?.[0]?.path?.join(' → ') || 'a field';
+        throw httpError(400, `The draft could not be saved: ${where} is not valid. Reload the page and try again.`);
+      }
       doc.info.processId = d.doc.info.processId; doc.info.version = d.doc.info.version; doc.info.createdAt = d.doc.info.createdAt; doc.changeHistory = d.doc.changeHistory;
       d.doc = doc;
       if (d.baseDoc) d.comparison = compareDocs(d.baseDoc, d.doc);
@@ -691,6 +708,7 @@ export function createApp(cfg, deps = {}) {
       doc.info.title = name; doc.info.fileName = cleanFileName(name);
     }
     doc.info.fileName = cleanFileName(doc.info.title) || doc.info.fileName;
+    doc.keywords = normalizeKeywords(doc.keywords?.length ? doc.keywords : extractKeywords(doc));
     const baseShots = await baseShotsToTemp(d, doc);
     const resolve = (id) => shotResolver(d)(id) || baseShots.find((x) => x.id === id)?.path || null;
     const used = [...new Set(doc.steps.flatMap((s) => s.screenshotIds))];
@@ -721,6 +739,7 @@ export function createApp(cfg, deps = {}) {
     if (cfg.retention.purgeRawAfterPublish) store.purgeRawCapture(d.sessionId, new Set(used));
     audit.write(req.user, 'draft.published', { draftId: d.id, processId: result.processId, version: result.version, webUrl: result.webUrl });
     notify('process.published', { processId: result.processId, version: result.version, title: doc.info.title, webUrl: result.webUrl });
+    searchIndex.refresh({ force: true }).catch(() => {}); // the new version is searchable right away
     res.json(draftView(d));
   }));
 
@@ -799,6 +818,7 @@ export function createApp(cfg, deps = {}) {
       if (existing.has(doc.info.title)) continue;
       const r = await repo.publish({ doc, docx: await renderDocx(doc), markdown: renderMarkdown(doc), screenshots: [], expectedEtag: null, publishedBy: req.user, owners: [], translations: [] });
       added.push({ processId: r.processId, title: doc.info.title });
+      searchIndex.refresh({ force: true }).catch(() => {});
     }
     audit.write(req.user, 'admin.samples_added', { count: added.length });
     res.json({ added });

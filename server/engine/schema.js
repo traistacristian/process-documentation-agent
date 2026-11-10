@@ -33,6 +33,8 @@ export const DocSchema = z.object({
     fileName: str, // name of the folder and Word file in SharePoint ('' = the title)
   }),
   purpose: str,
+  // Search keywords (the words people type to find this process).
+  keywords: strList,
   scope: z.object({ included: strList, excluded: strList }),
   prerequisites: z.object({ permissions: strList, access: strList, systems: strList, information: strList, dependencies: strList }),
   roles: z.array(z.object({ role: str, responsibilities: str })),
@@ -55,7 +57,7 @@ export function emptyDoc(info = {}) {
   const now = new Date().toISOString();
   return {
     info: { processId: '', title: '', version: '0.1', createdAt: now, updatedAt: now, owner: '', department: '', category: '', author: '', approver: '', status: 'Draft', language: 'en', fileName: '', ...info },
-    purpose: '', scope: { included: [], excluded: [] },
+    purpose: '', keywords: [], scope: { included: [], excluded: [] },
     prerequisites: { permissions: [], access: [], systems: [], information: [], dependencies: [] },
     roles: [], steps: [], decisions: [], exceptions: [], expectedOutcome: '', verification: [],
     troubleshooting: [], related: [], changeHistory: [],
@@ -71,5 +73,12 @@ export function normalizeDoc(doc) {
   const base = emptyDoc();
   const d = { ...base, ...doc, info: { ...base.info, ...(doc?.info || {}) }, scope: { ...base.scope, ...(doc?.scope || {}) }, prerequisites: { ...base.prerequisites, ...(doc?.prerequisites || {}) } };
   d.steps = (d.steps || []).map((s, i) => ({ ...emptyStep(i + 1), ...s, number: i + 1 }));
+  // Rows added in the editor carry only the fields that have an input box; complete them.
+  const rows = (list, blank) => (Array.isArray(list) ? list : []).map((r) => ({ ...blank, ...r }));
+  d.roles = rows(d.roles, { role: '', responsibilities: '' });
+  d.decisions = rows(d.decisions, { condition: '', action: '', stepNumber: null }).map((x) => ({ ...x, stepNumber: Number.isInteger(x.stepNumber) ? x.stepNumber : null }));
+  d.exceptions = rows(d.exceptions, { problem: '', handling: '', escalation: '' });
+  d.troubleshooting = rows(d.troubleshooting, { issue: '', resolution: '' });
+  d.related = rows(d.related, { title: '', url: '' });
   return DocSchema.parse(d);
 }

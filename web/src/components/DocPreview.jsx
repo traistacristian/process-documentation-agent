@@ -23,6 +23,7 @@ export default function DocPreview({ doc, shotUrl }) {
       <h2>1. Process Information</h2>
       <table><tbody>
         {[['Process ID', i.processId], ['Version', i.version], ['Status', i.status], ['Created', fmtDate(i.createdAt)], ['Last updated', fmtDate(i.updatedAt)], ['Process owner', i.owner], ['Department', i.department], ['Category', i.category], ['Author', i.author], ['Reviewer / approver', i.approver]].map(([k, v]) => <tr key={k}><th style={{ width: 200 }}>{k}</th><td>{v || '–'}</td></tr>)}
+        <tr><th>Keywords</th><td>{doc.keywords?.length ? <div className="tags compact" data-testid="doc-keywords">{doc.keywords.map((k) => <a key={k} className="tag" href={`#/library?q=${encodeURIComponent(k)}`} title="Find processes with this keyword">{k}</a>)}</div> : '–'}</td></tr>
       </tbody></table>
       <h2>2. Purpose</h2>{doc.purpose ? <p style={{ whiteSpace: 'pre-wrap' }}>{doc.purpose}</p> : <p className="empty">To be confirmed.</p>}
       <h2>3. Scope</h2><b>Included</b><List items={doc.scope.included} /><b>Excluded</b><List items={doc.scope.excluded} />

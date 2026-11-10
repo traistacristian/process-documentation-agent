@@ -25,6 +25,28 @@ export function sectionStatus(doc) {
   ];
 }
 
+// Search keywords as removable chips; type and press Enter or comma to add one.
+function KeywordsField({ value, onChange, disabled }) {
+  const [t, setT] = useState('');
+  const add = (raw) => {
+    const parts = raw.split(/[,;]/).map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const next = [...value];
+    for (const x of parts) if (!next.some((k) => k.toLowerCase() === x.toLowerCase())) next.push(x.slice(0, 60));
+    onChange(next.slice(0, 20)); setT('');
+  };
+  return (
+    <div className="f" style={{ marginTop: 10 }}>
+      Keywords <span className="opt">(used by the search; the systems, objects and actions people would type)</span>
+      <div className="tags edit" data-testid="keywords">
+        {value.map((k) => <span key={k} className="tag">{k}{!disabled && <button type="button" aria-label={`Remove ${k}`} onClick={() => onChange(value.filter((x) => x !== k))}>✕</button>}</span>)}
+        {!disabled && value.length < 20 && <input value={t} placeholder={value.length ? 'Add keyword…' : 'e.g. password, reset, MFA'} onChange={(e) => (/[,;]/.test(e.target.value) ? add(e.target.value) : setT(e.target.value))}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (t.trim()) add(t); } else if (e.key === 'Backspace' && !t && value.length) onChange(value.slice(0, -1)); }}
+          onBlur={() => t.trim() && add(t)} data-testid="keyword-input" />}
+      </div>
+    </div>
+  );
+}
+
 const Sec = ({ st, title, children, right }) => (
   <details className="panel sec" open id={`sec-${st.n}`}>
     <summary><span className={`check ${st.done ? 'on' : ''}`}>✓</span><h2>{st.n}. {title}</h2>{st.optional && !st.done && <span className="small muted">optional</span>}{right}</summary>
@@ -52,7 +74,7 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
           {!readOnly && <button className="btn sm" style={{ marginTop: 6 }} onClick={() => { const d = structuredClone(doc); d[key].splice(i, 1); onChange(d); }}>✕</button>}
         </div>
       ))}
-      {!readOnly && <button className="btn sm" onClick={() => { const d = structuredClone(doc); d[key].push(Object.fromEntries(fields.map((f) => [f, f === 'stepNumber' ? null : '']))); onChange(d); }}>+ Add</button>}
+      {!readOnly && <button className="btn sm" onClick={() => { const d = structuredClone(doc); d[key].push({ ...(key === 'decisions' ? { stepNumber: null } : {}), ...Object.fromEntries(fields.map((f) => [f, ''])) }); onChange(d); }}>+ Add</button>}
     </div>
   );
 
@@ -65,6 +87,7 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
           <label className="f">Process owner<input value={doc.info.owner} disabled={readOnly} onChange={(e) => set('info.owner', e.target.value)} /></label>
           <label className="f">Responsible department<input value={doc.info.department} disabled={readOnly} onChange={(e) => set('info.department', e.target.value)} /></label>
         </div>
+        <KeywordsField value={doc.keywords || []} onChange={(v) => set('keywords', v)} disabled={readOnly} />
         <p className="small muted">Process ID {doc.info.processId} · version {doc.info.version} (assigned at approval) · author {doc.info.author}</p>
       </Sec>
       <Sec st={st[1]} title="Purpose">

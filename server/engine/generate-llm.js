@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { DocSchema, normalizeDoc } from './schema.js';
 import { SYSTEM_PROMPT, buildUserPrompt } from './prompts.js';
 import { generateWithRules } from './generate-rules.js';
+import { extractKeywords, normalizeKeywords } from './keywords.js';
 
 const LlmStep = DocSchema.shape.steps.element.omit({ id: true, number: true, targets: true, marks: true });
 const LlmOutput = z.object({
@@ -107,6 +108,9 @@ export function finalize({ out, skeleton, events, screenshots, base, meta, user,
     }
     return step;
   });
+  // Keywords: the model's, completed from the document itself when it gave fewer than five.
+  doc.keywords = normalizeKeywords(out.doc.keywords || []);
+  if (doc.keywords.length < 5) doc.keywords = normalizeKeywords([...doc.keywords, ...(skeleton.doc.keywords || []), ...extractKeywords({ ...doc, info: skeleton.doc.info })]).slice(0, 12);
   for (const c of out.clarifications) {
     const step = c.stepNumber ? doc.steps[c.stepNumber - 1] : null;
     ask(c.section, c.question, step?.id ?? null);
