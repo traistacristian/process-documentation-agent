@@ -127,9 +127,36 @@ function FlowPanel({ processId, title }) {
   );
 }
 
+// Marks the parts of a text that match the searched words (accents and case ignored).
+const fold = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+function Hl({ text, terms }) {
+  if (!terms?.length || !text) return text || null;
+  const f = fold(text); const parts = []; let i = 0;
+  const re = /[\p{L}\p{N}]+/gu; let m;
+  while ((m = re.exec(f))) {
+    const w = m[0]; const hit = terms.some((t) => w === t || w.startsWith(t) || (w.endsWith('s') && w.slice(0, -1) === t));
+    if (!hit) continue;
+    if (m.index > i) parts.push(text.slice(i, m.index));
+    parts.push(<mark key={m.index}>{text.slice(m.index, m.index + w.length)}</mark>); i = m.index + w.length;
+  }
+  if (i < text.length) parts.push(text.slice(i));
+  return parts;
+}
+
 export default function Library({ processId }) {
-  const [list, setList] = useState(null); const [p, setP] = useState(null); const [err, setErr] = useState(null); const [q, setQ] = useState(''); const [lang, setLang] = useState('');
-  useEffect(() => { api(`/api/processes?q=${encodeURIComponent(q)}`).then(setList).catch((e) => setErr(e.message)); }, [q]);
+  const initialQ = new URLSearchParams(location.hash.split('?')[1] || '').get('q') || '';
+  const [list, setList] = useState(null); const [p, setP] = useState(null); const [err, setErr] = useState(null); const [q, setQ] = useState(initialQ); const [lang, setLang] = useState('');
+  const [tags, setTags] = useState([]); const [busy, setBusy] = useState(false); const [answered, setAnswered] = useState('');
+  useEffect(() => {
+    setBusy(true);
+    const t = setTimeout(() => api(`/api/processes?q=${encodeURIComponent(q)}`).then((items) => { setList(items); setAnswered(q); }).catch((e) => setErr(e.message)).finally(() => setBusy(false)), q ? 200 : 0);
+    return () => clearTimeout(t);
+  }, [q]);
+  useEffect(() => { // a keyword link in a document opens the library searched for that keyword
+    const f = () => { const v = new URLSearchParams(location.hash.split('?')[1] || '').get('q'); if (v !== null) setQ(v); };
+    addEventListener('hashchange', f); return () => removeEventListener('hashchange', f);
+  }, []);
+  useEffect(() => { if (!processId) api('/api/processes/keywords').then(setTags).catch(() => setTags([])); }, [processId]);
   useEffect(() => { if (processId) api(`/api/processes/${processId}${lang ? `?lang=${lang}` : ''}`).then(setP).catch((e) => setErr(e.message)); else setP(null); }, [processId, lang]);
   if (processId && p) return (
     <>
@@ -144,12 +171,30 @@ export default function Library({ processId }) {
     <DocPreview doc={p.doc} shotUrl={(id) => `/api/processes/${processId}/screenshots/${id}`} />
     </>
   );
+  const terms = q ? fold(q).match(/[\p{L}\p{N}]+/gu) || [] : [];
+  const isTag = (k) => fold(k) === fold(q.trim());
   return (
     <div className="panel">
       <h1>Process library</h1>
       {err && <div className="alert err">{err}</div>}
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" />
-      {list && (list.length ? <ul className="list" style={{ marginTop: 10 }}>{list.map((x) => <li key={x.processId}><span><a href={`#/library/${x.processId}`}><b>{x.title}</b></a><br /><span className="small muted">{x.processId} · {x.category || 'Uncategorised'} · owner {x.owner || '–'}</span></span><span className="small muted">v{x.version} · {fmtDate(x.updatedAt)}</span></li>)}</ul> : <p className="empty">No processes published yet.</p>)}
+      <div className="search-box">
+        <span className="search-icon" aria-hidden="true">⌕</span>
+        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search titles, keywords, systems, steps…" aria-label="Search processes" data-testid="library-search" autoFocus />
+        {q && <button className="btn sm" onClick={() => setQ('')} aria-label="Clear search">✕</button>}
+      </div>
+      {tags.length > 0 && <div className="tags" data-testid="keyword-filter"><span className="small muted">Keywords:</span>{tags.slice(0, 24).map((t) => <button key={t.keyword} className={`tag${isTag(t.keyword) ? ' on' : ''}`} onClick={() => setQ(isTag(t.keyword) ? '' : t.keyword)} title={`${t.count} process${t.count === 1 ? '' : 'es'}`}>{t.keyword}<span className="n">{t.count}</span></button>)}</div>}
+      {list && <p className="small muted" style={{ margin: '10px 0 0' }} data-testid="search-count">{answered ? `${list.length} result${list.length === 1 ? '' : 's'} for “${answered}”` : `${list.length} published process${list.length === 1 ? '' : 'es'}`}{busy ? ' · searching…' : ''}</p>}
+      {list && (list.length ? <ul className="list results" style={{ marginTop: 6 }}>{list.map((x) => (
+        <li key={x.processId} data-testid="search-result">
+          <span style={{ minWidth: 0 }}>
+            <a href={`#/library/${x.processId}`}><b><Hl text={x.title} terms={terms} /></b></a><br />
+            <span className="small muted">{x.processId} · {x.category || 'Uncategorised'} · owner {x.owner || '–'}</span>
+            {x.matched?.steps?.length > 0 && <div className="small found">Found in {x.matched.steps.map((s) => <span key={s.n}>step {s.n} – <Hl text={s.title} terms={terms} /></span>).reduce((a, b) => [a, '; ', b])}</div>}
+            {x.keywords?.length > 0 && <div className="tags compact">{x.keywords.slice(0, 10).map((k) => <button key={k} className={`tag${x.matched?.keywords?.includes(k) ? ' hit' : ''}`} onClick={() => setQ(k)}>{k}</button>)}</div>}
+          </span>
+          <span className="small muted" style={{ whiteSpace: 'nowrap' }}>v{x.version} · {fmtDate(x.updatedAt)}</span>
+        </li>))}</ul>
+        : answered ? <p className="empty">Nothing found for “{answered}”. Try fewer or shorter words; the search also matches word beginnings and small typos.</p> : <p className="empty">No processes published yet.</p>)}
     </div>
   );
 }

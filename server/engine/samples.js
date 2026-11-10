@@ -2,6 +2,7 @@
 // purpose (Administration → Demo content); they are published like any other document and marked
 // with the category "Sample" so they are easy to find and delete again.
 import { normalizeDoc } from './schema.js';
+import { extractKeywords } from './keywords.js';
 
 const S = (title, application, instructions, expectedResult, extra = {}) => ({ title, application, instructions, expectedResult, description: '', input: '', notes: [], warnings: [], important: false, ...extra });
 
@@ -87,5 +88,5 @@ export function sampleDocs({ user, newProcessId }) {
     info: { processId: newProcessId(), title, version: '1.0', createdAt: now, updatedAt: now, owner, department, category: 'Sample', author: user.name, approver: user.name, status: 'Published', language: 'en', fileName: title.replace(/[^\w .-]/g, '') },
     steps: steps.map((s, i) => ({ ...s, id: `stp_sample_${i + 1}`, number: i + 1, screenshotIds: [], evidenceEventSeqs: [], targets: [], marks: [] })),
     related: [], changeHistory: [{ version: '1.0', date: now, author: user.name, approver: user.name, summary: 'Sample process for demonstrations' }],
-  }));
+  })).map((d) => ({ ...d, keywords: extractKeywords(d) }));
 }

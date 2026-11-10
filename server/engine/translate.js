@@ -17,7 +17,7 @@ function textSlots(d) {
   const slots = [];
   const field = (obj, key) => { if (obj && typeof obj[key] === 'string' && obj[key].trim()) slots.push([() => obj[key], (v) => { obj[key] = v; }]); };
   const list = (arr) => arr?.forEach((_, i) => field(arr, i));
-  field(d.info, 'title'); field(d, 'purpose'); field(d, 'expectedOutcome');
+  field(d.info, 'title'); field(d, 'purpose'); list(d.keywords || []); field(d, 'expectedOutcome');
   list(d.scope.included); list(d.scope.excluded);
   for (const k of ['permissions', 'access', 'information', 'dependencies']) list(d.prerequisites[k]);
   d.roles.forEach((r) => { field(r, 'role'); field(r, 'responsibilities'); });

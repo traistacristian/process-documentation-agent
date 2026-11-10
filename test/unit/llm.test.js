@@ -17,7 +17,7 @@ fs.writeFileSync(shotPath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
 const step = (o) => ({ title: '', description: '', instructions: [], application: 'Contoso Admin Portal', input: '', expectedResult: '', screenshotIds: [], notes: [], warnings: [], important: false, evidenceEventSeqs: [], ...o });
 const answer = {
   doc: {
-    purpose: '', scope: { included: [], excluded: [] }, prerequisites: { permissions: [], access: [], systems: ['Contoso Admin Portal'], information: [], dependencies: [] },
+    purpose: '', keywords: ['helpdesk', 'permissions'], scope: { included: [], excluded: [] }, prerequisites: { permissions: [], access: [], systems: ['Contoso Admin Portal'], information: [], dependencies: [] },
     roles: [], decisions: [], exceptions: [], expectedOutcome: 'The user has the Helpdesk administrator role.', verification: [], troubleshooting: [], related: [],
     steps: [
       step({ title: 'Find the user account', instructions: ['Open Active users.', 'Search for the user by username.', 'Open the user.'], evidenceEventSeqs: [2, 3, 4, 6], screenshotIds: ['shot_aa01', 'shot_invented'] }),
@@ -77,6 +77,8 @@ test('request uses structured output, adaptive thinking, fallbacks and sends scr
   assert.ok(r.clarifications.some((c) => c.stepId === invented.id), 'unsupported step must be confirmed by a person');
   assert.ok(r.clarifications.some((c) => c.section === 'purpose'), 'empty purpose is asked');
   assert.ok(r.clarifications.some((c) => /external accounts/.test(c.question)));
+  assert.deepEqual(r.doc.keywords.slice(0, 2), ['helpdesk', 'permissions'], 'the model\'s keywords come first');
+  assert.ok(r.doc.keywords.length >= 5, 'too few keywords are completed from the document');
 });
 
 test('malformed model output is rejected (the API then falls back to the rule engine)', async () => {

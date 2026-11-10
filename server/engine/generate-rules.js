@@ -4,6 +4,7 @@
 // clarification request instead of being invented.
 import crypto from 'node:crypto';
 import { emptyDoc, emptyStep, normalizeDoc } from './schema.js';
+import { extractKeywords, normalizeKeywords } from './keywords.js';
 import { segmentEvents, pageName, applicationName } from './segment.js';
 
 const q = (s) => `"${String(s).trim()}"`;
@@ -152,5 +153,6 @@ export function generateWithRules({ meta, events, screenshotsAvailable = new Set
   if (unshot) suggestions.push(`${unshot} step(s) have no screenshot. Consider re-recording with screen capture enabled or attaching images.`);
   if (doc.steps.length > 15) suggestions.push('This process has many steps; consider splitting it into sub-processes.');
 
+  doc.keywords = normalizeKeywords([...(doc.keywords || []), ...extractKeywords(doc)]).slice(0, Math.max(12, (doc.keywords || []).length));
   return { doc: normalizeDoc(doc), clarifications, suggestions, engine: 'rules' };
 }

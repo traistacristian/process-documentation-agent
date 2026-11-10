@@ -14,7 +14,7 @@ const LABELS = {
     step: 'Step', app: 'Application / system', input: 'Required input', result: 'Expected result', screenshot: 'Screenshot', note: 'Note', warning: 'Warning',
     figure: 'Figure', notAvailable: 'not available', important: 'IMPORTANT STEP', importantHint: 'Take extra care: this step is critical for the process.', marksHint: 'The numbers show the order of the clicks; frames show the fields to fill in.', noDecisions: 'No decision points recorded.', ifThen: (c, a) => `If ${c}, then ${a}`, stepRef: (n) => `step ${n}`,
     exc: ['Problem', 'Handling / recovery', 'Escalation'], noIssues: 'No known issues recorded.', issue: ['Issue', 'Resolution'], none: 'None.',
-    role: ['Role', 'Responsibilities'], history: ['Version', 'Date', 'Author', 'Approver', 'Summary'], subtitle: 'IT Process Documentation', eyebrow: 'IT WORK INSTRUCTION', page: 'Page', of: 'of', steps: 'Steps',
+    role: ['Role', 'Responsibilities'], history: ['Version', 'Date', 'Author', 'Approver', 'Summary'], keywords: 'Keywords', subtitle: 'IT Process Documentation', eyebrow: 'IT WORK INSTRUCTION', page: 'Page', of: 'of', steps: 'Steps',
   },
   de: {
     sections: ['Prozessinformationen', 'Zweck', 'Geltungsbereich', 'Voraussetzungen', 'Rollen und Verantwortlichkeiten', 'Prozessablauf – Schritt für Schritt', 'Entscheidungspunkte und Ausnahmen', 'Erwartetes Ergebnis', 'Fehlerbehebung', 'Zugehörige Dokumentation', 'Änderungshistorie'],
@@ -24,7 +24,7 @@ const LABELS = {
     step: 'Schritt', app: 'Anwendung / System', input: 'Erforderliche Eingabe', result: 'Erwartetes Ergebnis', screenshot: 'Screenshot', note: 'Hinweis', warning: 'Warnung',
     figure: 'Abbildung', notAvailable: 'nicht verfügbar', important: 'WICHTIGER SCHRITT', importantHint: 'Bitte besonders sorgfältig ausführen: Dieser Schritt ist entscheidend für den Prozess.', marksHint: 'Die Zahlen zeigen die Reihenfolge der Klicks, Rahmen die auszufüllenden Felder.', noDecisions: 'Keine Entscheidungspunkte erfasst.', ifThen: (c, a) => `Wenn ${c}, dann ${a}`, stepRef: (n) => `Schritt ${n}`,
     exc: ['Problem', 'Behandlung / Wiederherstellung', 'Eskalation'], noIssues: 'Keine bekannten Probleme erfasst.', issue: ['Problem', 'Lösung'], none: 'Keine.',
-    role: ['Rolle', 'Verantwortlichkeiten'], history: ['Version', 'Datum', 'Autor', 'Freigabe', 'Zusammenfassung'], subtitle: 'IT-Prozessdokumentation', eyebrow: 'IT-ARBEITSANWEISUNG', page: 'Seite', of: 'von', steps: 'Schritte',
+    role: ['Rolle', 'Verantwortlichkeiten'], history: ['Version', 'Datum', 'Autor', 'Freigabe', 'Zusammenfassung'], keywords: 'Schlüsselwörter', subtitle: 'IT-Prozessdokumentation', eyebrow: 'IT-ARBEITSANWEISUNG', page: 'Seite', of: 'von', steps: 'Schritte',
   },
 };
 export const labelsFor = (d) => LABELS[d?.info?.language] || LABELS.en;
@@ -32,7 +32,7 @@ export const labelsFor = (d) => LABELS[d?.info?.language] || LABELS.en;
 const infoRows = (d, L) => [
   d.info.title, d.info.processId, d.info.version, d.info.createdAt?.slice(0, 10), d.info.updatedAt?.slice(0, 10),
   d.info.owner, d.info.department, d.info.category, d.info.author, d.info.approver, d.info.status,
-].map((v, i) => [L.info[i], v]);
+].map((v, i) => [L.info[i], v]).concat([[L.keywords, (d.keywords || []).join(', ')]]);
 
 export function renderMarkdown(d) {
   const T = labelsFor(d); const SECTIONS = T.sections; const TBD = T.tbd;
@@ -152,7 +152,7 @@ export async function renderDocx(d, resolveShot = () => null) {
   children.push(H(`11. ${SECTIONS[10]}`), table(d.changeHistory.map((c) => [c.version, c.date?.slice(0, 10), c.author, c.approver, c.summary]), T.history));
 
   const doc = new Document({
-    creator: 'Process Documentation Agent', title: d.info.title, description: `${d.info.processId} v${d.info.version}`,
+    creator: 'Process Documentation Agent', title: d.info.title, description: `${d.info.processId} v${d.info.version}`, keywords: (d.keywords || []).join(', '), subject: d.info.category || undefined,
     styles: { default: { document: { run: { font: 'Segoe UI', size: 21 } }, heading1: { run: { font: 'Segoe UI', size: 30, bold: true, color: '08534D' }, paragraph: { spacing: { before: 360, after: 120 } } }, heading2: { run: { font: 'Segoe UI', size: 24, bold: true, color: '14212B' } } } },
     sections: [
       { children: cover },

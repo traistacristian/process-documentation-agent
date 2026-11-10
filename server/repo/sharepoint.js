@@ -18,6 +18,9 @@ import fs from 'node:fs';
 import { GraphClient } from './graph.js';
 
 const COLUMNS = ['PDA_ProcessId', 'PDA_Version', 'PDA_Status', 'PDA_Owner', 'PDA_Department', 'PDA_Category', 'PDA_Approver'];
+// Written on publish but not read back (the app's own search index has the keywords). SharePoint search
+// and library views can filter on it. Created on first use when the library does not have it yet.
+const KEYWORDS_COLUMN = 'PDA_Keywords';
 const safe = (s) => String(s || 'Uncategorised').replace(/[\\/:*?"<>|#%]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Uncategorised';
 const enc = (p) => p.split('/').map(encodeURIComponent).join('/');
 const SIMPLE_UPLOAD_LIMIT = 4 * 1024 * 1024;
@@ -58,9 +61,29 @@ export class SharePointRepository {
     const cols = await this.graph.get(`/sites/${siteId}/lists/${listId}/columns?$select=name`);
     const have = new Set(cols.value.map((c) => c.name));
     for (const name of COLUMNS) if (!have.has(name)) await this.graph.post(`/sites/${siteId}/lists/${listId}/columns`, { name, displayName: name.replace('PDA_', 'Process '), text: {}, indexed: name === 'PDA_ProcessId' });
+    if (!have.has(KEYWORDS_COLUMN)) await this.#createKeywordsColumn(siteId, listId);
     await this.#ensureFolder(driveId, this.sp.rootFolder);
     for (const c of categories) await this.#ensureFolder(driveId, `${this.sp.rootFolder}/${safe(c)}`);
     return { columns: COLUMNS, categories };
+  }
+
+  async #createKeywordsColumn(siteId, listId) {
+    try { await this.graph.post(`/sites/${siteId}/lists/${listId}/columns`, { name: KEYWORDS_COLUMN, displayName: 'Process Keywords', text: { allowMultipleLines: true, linesForEditing: 3 } }); } catch (e) { if (e.status !== 409) throw e; }
+  }
+
+  // Keywords on the Word document's list item. A library set up before keywords existed gets the
+  // column on first use; keywords never block publishing.
+  async #writeKeywords(driveId, itemId, keywords) {
+    if (!keywords?.length) return;
+    const body = { [KEYWORDS_COLUMN]: keywords.join('; ').slice(0, 2000) };
+    try { await this.graph.patch(`/drives/${driveId}/items/${itemId}/listItem/fields`, body); } catch (e) {
+      if (e.status !== 400) return;
+      try {
+        const { siteId, listId } = await this.#resolve();
+        await this.#createKeywordsColumn(siteId, listId);
+        await this.graph.patch(`/drives/${driveId}/items/${itemId}/listItem/fields`, body);
+      } catch { /* no permission to add columns: the app's own search still has the keywords */ }
+    }
   }
 
   async #ensureFolder(driveId, path) {
@@ -213,6 +236,7 @@ export class SharePointRepository {
         Title: doc.info.title, PDA_ProcessId: doc.info.processId, PDA_Version: doc.info.version, PDA_Status: doc.info.status,
         PDA_Owner: doc.info.owner, PDA_Department: doc.info.department, PDA_Category: doc.info.category, PDA_Approver: doc.info.approver,
       });
+      await this.#writeKeywords(driveId, docItem.id, doc.keywords);
     }
     // 4. Optional: give the process owner edit rights on the document.
     if (this.sp.assignOwnerPermissions && owners.length) {

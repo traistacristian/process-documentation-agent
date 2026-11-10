@@ -33,6 +33,8 @@ export const DocSchema = z.object({
     fileName: str, // name of the folder and Word file in SharePoint ('' = the title)
   }),
   purpose: str,
+  // Search keywords (the words people type to find this process).
+  keywords: strList,
   scope: z.object({ included: strList, excluded: strList }),
   prerequisites: z.object({ permissions: strList, access: strList, systems: strList, information: strList, dependencies: strList }),
   roles: z.array(z.object({ role: str, responsibilities: str })),
@@ -55,7 +57,7 @@ export function emptyDoc(info = {}) {
   const now = new Date().toISOString();
   return {
     info: { processId: '', title: '', version: '0.1', createdAt: now, updatedAt: now, owner: '', department: '', category: '', author: '', approver: '', status: 'Draft', language: 'en', fileName: '', ...info },
-    purpose: '', scope: { included: [], excluded: [] },
+    purpose: '', keywords: [], scope: { included: [], excluded: [] },
     prerequisites: { permissions: [], access: [], systems: [], information: [], dependencies: [] },
     roles: [], steps: [], decisions: [], exceptions: [], expectedOutcome: '', verification: [],
     troubleshooting: [], related: [], changeHistory: [],

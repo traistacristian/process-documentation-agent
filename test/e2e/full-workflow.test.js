@@ -139,6 +139,16 @@ test('new process: capture real browser activity, generate, review, approve and 
   const docx = fs.readFileSync(path.join(pub.published.location, 'document.docx'));
   assert.equal(docx.subarray(0, 2).toString(), 'PK', 'a valid .docx (zip) was published');
   assert.ok(fs.readdirSync(path.join(pub.published.location, 'screenshots')).length > 0);
+  assert.ok(proc.doc.keywords.length >= 3, 'the published document has search keywords');
+  // Search: by keyword, by a word inside a step, with a typo; the library shows the result and its keywords.
+  const found = await apiGet(`/api/processes?q=${encodeURIComponent('helpdesk permision')}`);
+  assert.equal(found[0]?.processId, pub.published.processId, 'found with a typo');
+  assert.ok((await apiGet(`/api/processes?q=${encodeURIComponent(proc.doc.keywords[0])}`)).some((x) => x.processId === pub.published.processId), 'found by keyword');
+  await app.goto(`${appUrl}/#/library`);
+  await app.getByTestId('library-search').fill('permission level');
+  await app.getByTestId('search-count').filter({ hasText: 'for “permission level”' }).waitFor();
+  assert.match(await app.getByTestId('search-result').first().innerText(), /Found in step/);
+  await snap(app, '05b-library-search');
   await portal.close(); await app.close();
 });
 

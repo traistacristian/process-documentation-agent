@@ -15,7 +15,8 @@ How to work:
 8. Suggestions are optional recommendations to improve the process or the documentation (for example a missing verification step or an automation opportunity). Keep them separate from the documented steps.
 9. When an existing approved document is provided, this is an update. Reuse the existing wording, step titles and terminology for every step that was performed the same way, so that the comparison shows only real changes. Keep existing purpose, scope, roles, prerequisites and troubleshooting unless the new recording contradicts them; raise a clarification when it does.
 10. Set important to true for every step the employee marked as important, and for steps where a mistake is costly or hard to undo: deleting, removing, resetting, blocking or disabling something, granting or revoking permissions or admin roles, and checks that must pass before continuing (such as verifying the caller's identity or an approval). Leave it false for routine navigation and data entry, so the highlight stays meaningful.
-11. Write the whole document in the language named in <document_language> (British English or German). Keep the names of menus, buttons and fields exactly as captured, even when they are in another language.`;
+11. Give 6 to 12 search keywords: the words a colleague would type to find this procedure - the systems used, the objects handled (user, licence, mailbox, group…), the action (create, reset, offboard…), common synonyms and abbreviations (MFA, M365, AAD / Entra ID). No full sentences, no personal data. When updating an existing document, keep its keywords and add new ones only where the process changed.
+12. Write the whole document in the language named in <document_language> (British English or German). Keep the names of menus, buttons and fields exactly as captured, even when they are in another language.`;
 
 export function buildUserPrompt({ meta, candidateSteps, events, screenshots, base }) {
   const lines = [];
