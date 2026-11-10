@@ -74,7 +74,7 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
           {!readOnly && <button className="btn sm" style={{ marginTop: 6 }} onClick={() => { const d = structuredClone(doc); d[key].splice(i, 1); onChange(d); }}>✕</button>}
         </div>
       ))}
-      {!readOnly && <button className="btn sm" onClick={() => { const d = structuredClone(doc); d[key].push(Object.fromEntries(fields.map((f) => [f, f === 'stepNumber' ? null : '']))); onChange(d); }}>+ Add</button>}
+      {!readOnly && <button className="btn sm" onClick={() => { const d = structuredClone(doc); d[key].push({ ...(key === 'decisions' ? { stepNumber: null } : {}), ...Object.fromEntries(fields.map((f) => [f, ''])) }); onChange(d); }}>+ Add</button>}
     </div>
   );
 

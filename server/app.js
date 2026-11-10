@@ -506,7 +506,11 @@ export function createApp(cfg, deps = {}) {
     const b = req.body || {};
     if (b.baseUpdatedAt && b.baseUpdatedAt !== d.updatedAt) throw httpError(409, 'This draft was changed by someone else. Reload it before saving.', 'CONFLICT');
     if (b.doc) {
-      const doc = normalizeDoc(b.doc);
+      let doc;
+      try { doc = normalizeDoc(b.doc); } catch (e) {
+        const where = e.issues?.[0]?.path?.join(' → ') || 'a field';
+        throw httpError(400, `The draft could not be saved: ${where} is not valid. Reload the page and try again.`);
+      }
       doc.info.processId = d.doc.info.processId; doc.info.version = d.doc.info.version; doc.info.createdAt = d.doc.info.createdAt; doc.changeHistory = d.doc.changeHistory;
       d.doc = doc;
       if (d.baseDoc) d.comparison = compareDocs(d.baseDoc, d.doc);
