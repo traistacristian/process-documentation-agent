@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { AuthImg, Lightbox, MarksHint } from '../util.jsx';
+import { Lightbox, MarksHint } from '../util.jsx';
+import { MarkedShot, ShotEditor } from './ShotEditor.jsx';
 
 const toLines = (t) => t.split('\n').map((x) => x.trim()).filter(Boolean);
 const LinesField = ({ label, value, onChange, disabled, testid }) => (
@@ -54,8 +55,18 @@ const Sec = ({ st, title, children, right }) => (
   </details>
 );
 
-export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
+export default function DocEditor({ doc, onChange, shotUrl, readOnly, suggestMarks }) {
   const [zoom, setZoom] = useState(null);
+  const [editing, setEditing] = useState(null); // { i, id }
+  const raw = (id) => `${shotUrl(id)}${shotUrl(id).includes('?') ? '&' : '?'}raw=1`;
+  const shotMarks = (s, id) => (s.marks || []).filter((m) => m.shotId === id);
+  const shotCrop = (s, id) => (s.crops || []).find((c) => c.shotId === id) || null;
+  const saveShot = ({ marks, crop }) => {
+    const { i, id } = editing; const d = structuredClone(doc); const st = d.steps[i];
+    st.marks = [...(st.marks || []).filter((m) => m.shotId !== id), ...marks.map((m) => ({ ...m, shotId: id }))];
+    st.crops = [...(st.crops || []).filter((c) => c.shotId !== id), ...(crop ? [{ ...crop, shotId: id }] : [])];
+    onChange(d); setEditing(null);
+  };
   const st = sectionStatus(doc);
   const set = (path, v) => {
     const d = structuredClone(doc); let o = d; const p = path.split('.');
@@ -81,6 +92,8 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
   return (
     <div>
       <Lightbox url={zoom} onClose={() => setZoom(null)} />
+      {editing && (() => { const s = doc.steps[editing.i]; return <ShotEditor src={raw(editing.id)} shotId={editing.id} marks={shotMarks(s, editing.id)} crop={shotCrop(s, editing.id)} instructions={s.instructions}
+        onSuggest={suggestMarks ? (instr) => suggestMarks(editing.id, instr) : null} onSave={saveShot} onClose={() => setEditing(null)} />; })()}
       <Sec st={st[0]} title="Process information">
         <div className="grid g3" style={{ gap: 12 }}>
           <label className="f">Process title<input value={doc.info.title} disabled={readOnly} onChange={(e) => set('info.title', e.target.value)} /></label>
@@ -133,7 +146,10 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly }) {
               <div key={k} className="warn-line">⚠ {w} {!readOnly && <button className="btn sm" onClick={() => setStep(i, 'warnings', s.warnings.filter((_, j) => j !== k))} data-testid="confirm-warning">{w.startsWith('Not supported') ? 'Confirm step' : 'Dismiss'}</button>}</div>
             ))}
             {s.screenshotIds.length > 0 && <div className="shots">{s.screenshotIds.map((id) => (
-              <figure key={id}><AuthImg src={shotUrl(id)} alt={`Step ${s.number}`} onClick={setZoom} />{!readOnly && <button className="btn sm" title="Remove screenshot" onClick={() => setStep(i, 'screenshotIds', s.screenshotIds.filter((x) => x !== id))}>✕</button>}</figure>
+              <figure key={id}>
+                <MarkedShot src={raw(id)} marks={shotMarks(s, id)} crop={shotCrop(s, id)} alt={`Step ${s.number}`} onClick={readOnly ? undefined : () => setEditing({ i, id })} />
+                {!readOnly && <div className="shot-actions"><button className="btn sm" onClick={() => setEditing({ i, id })} data-testid="edit-shot">✎ Markers &amp; crop</button><button className="btn sm" title="Remove screenshot" onClick={() => setStep(i, 'screenshotIds', s.screenshotIds.filter((x) => x !== id))}>✕</button></div>}
+              </figure>
             ))}</div>}
             <MarksHint step={s} />
             <p className="small muted" style={{ marginBottom: 0 }}>{s.evidenceEventSeqs.length ? `Based on ${s.evidenceEventSeqs.length} recorded action(s).` : 'Added manually – not based on recorded actions.'}</p>

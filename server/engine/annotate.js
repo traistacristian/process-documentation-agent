@@ -60,6 +60,7 @@ export function attachMarks(doc, events) {
   return doc;
 }
 
+export const cropFor = (doc, shotId) => (doc?.steps || []).flatMap((s) => ((s.screenshotIds || []).includes(shotId) ? (s.crops || []).filter((c) => c.shotId === shotId) : []))[0] || null;
 export const marksFor = (doc, shotId) => (doc?.steps || []).flatMap((s) => (s.screenshotIds || []).includes(shotId) ? (s.marks || []).filter((m) => m.shotId === shotId) : []);
 
 const GREEN = '#2FA84F'; const GREEN_DARK = '#1E6E34';
@@ -100,6 +101,18 @@ export function marksSvg(marks, W, H) {
   }
   // Frames first, numbered circles on top of them.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${frames.join('')}${badges.join('')}</svg>`;
+}
+
+// The screenshot as shown in documents: markers drawn, then cut to the chosen part (crop, as fractions).
+export async function renderShot(buffer, marks, crop) {
+  const drawn = await annotateImage(buffer, marks);
+  if (!crop || !(crop.w > 0 && crop.h > 0) || (crop.x <= 0 && crop.y <= 0 && crop.w >= 1 && crop.h >= 1)) return drawn;
+  const meta = await sharp(drawn).metadata();
+  const left = Math.max(0, Math.round(crop.x * meta.width)); const top = Math.max(0, Math.round(crop.y * meta.height));
+  const width = Math.min(meta.width - left, Math.round(crop.w * meta.width)); const height = Math.min(meta.height - top, Math.round(crop.h * meta.height));
+  if (width < 8 || height < 8) return drawn;
+  const out = sharp(drawn).extract({ left, top, width, height });
+  return meta.format === 'png' ? out.png().toBuffer() : out.jpeg({ quality: 88 }).toBuffer();
 }
 
 // Draws the markers onto the image. Returns the original buffer when there is nothing to draw.

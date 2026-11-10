@@ -54,3 +54,29 @@ test('the recorded element position is sanitised to numbers', () => {
   assert.deepEqual(ev.box, { x: 1, y: 2, w: 3, h: 4, vw: 800, vh: 600, sx: 0, sy: 10 });
   assert.equal(sanitizeEvent({ type: 'click', box: { x: 'a' } }, { sensitiveFieldPatterns: [], excludedApps: [], excludedUrls: [] }).box, undefined);
 });
+
+test('a crop cuts the shown screenshot after the markers are drawn', async () => {
+  const { renderShot } = await import('../../server/engine/annotate.js');
+  const img = await sharp({ create: { width: 1000, height: 500, channels: 3, background: '#ffffff' } }).jpeg().toBuffer();
+  const out = await renderShot(img, [{ n: 1, kind: 'click', x: 0, y: 0, w: 0, h: 0, cx: 0.1, cy: 0.1 }], { x: 0, y: 0, w: 0.5, h: 0.4 });
+  const m = await sharp(out).metadata();
+  assert.deepEqual([m.width, m.height], [500, 200]);
+  assert.equal(await renderShot(img, [], null), img, 'nothing to do: the original');
+});
+
+test('AI marker placement: pixels become ordered fractions, unknown and oversized boxes are dropped', async () => {
+  const { locateMarks } = await import('../../server/engine/locate.js');
+  const { loadConfig } = await import('../../server/config.js');
+  const img = await sharp({ create: { width: 2560, height: 1440, channels: 3, background: '#ffffff' } }).png().toBuffer();
+  let req;
+  const client = { messages: { create: async (r) => { req = r; return { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ elements: [
+    { instruction: 2, kind: 'click', x: 640, y: 360, width: 64, height: 36 },
+    { instruction: 1, kind: 'field', x: 128, y: 72, width: 256, height: 36 },
+    { instruction: 9, kind: 'click', x: 1, y: 1, width: 5, height: 5 },
+    { instruction: 1, kind: 'click', x: 0, y: 0, width: 1280, height: 720 },
+  ] }) }] }; } } };
+  const marks = await locateMarks({ cfg: loadConfig(), buffer: img, instructions: ['Enter the name in "Display name".', 'Click "Save".'], client });
+  assert.match(req.messages[0].content[1].text, /1280 x 720 pixels[\s\S]*2\. Click "Save"/);
+  assert.deepEqual(marks.map((m) => [m.n, m.kind, m.x, m.y]), [[1, 'field', 0.1, 0.1], [2, 'click', 0.5, 0.5]]);
+  assert.deepEqual(await locateMarks({ cfg: loadConfig(), buffer: img, instructions: [], client }), []);
+});

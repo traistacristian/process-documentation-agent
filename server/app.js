@@ -16,7 +16,8 @@ import { protectScreenshot } from './engine/privacy.js';
 import { attachTargets } from './engine/targets.js';
 import { SearchIndex } from './search.js';
 import { extractKeywords, normalizeKeywords } from './engine/keywords.js';
-import { attachMarks, marksFor, annotateImage } from './engine/annotate.js';
+import { attachMarks, marksFor, cropFor, renderShot } from './engine/annotate.js';
+import { locateMarks } from './engine/locate.js';
 import { translateDoc, otherLanguages } from './engine/translate.js';
 import { generateScript } from './engine/script.js';
 import { generateFlow, flowToMarkdown } from './engine/flow.js';
@@ -259,8 +260,9 @@ export function createApp(cfg, deps = {}) {
   app.get('/api/processes/:pid/screenshots/:shot', wrap(async (req, res) => {
     const s = await repo.screenshot(req.params.pid, req.params.shot);
     if (!s) return res.status(404).end();
-    const marks = req.query.raw ? [] : marksFor(await publishedDoc(req.params.pid), req.params.shot);
-    res.type(s.mime).send(marks.length ? await annotateImage(s.buffer, marks) : s.buffer);
+    const pdoc = req.query.raw ? null : await publishedDoc(req.params.pid);
+    const marks = marksFor(pdoc, req.params.shot); const crop = cropFor(pdoc, req.params.shot);
+    res.type(s.mime).send(marks.length || crop ? await renderShot(s.buffer, marks, crop) : s.buffer);
   }));
   app.get('/api/repository/processes/:pid/:file', wrap(async (req, res) => {
     const buf = await repo.file(req.params.pid, req.params.file);
@@ -437,6 +439,7 @@ export function createApp(cfg, deps = {}) {
       doc.info.fileName = s.meta.fileName || s.baseRef?.doc?.info?.fileName || '';
       attachTargets(doc, events);
       attachMarks(doc, events);
+      await locateMissingMarks(doc, s.id, user);
       if (s.mode === 'new') {
         doc.info.processId = `PRC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
         doc.info.version = '0.1'; doc.info.createdAt = new Date().toISOString();
@@ -454,6 +457,28 @@ export function createApp(cfg, deps = {}) {
       store.put('drafts', draft);
       audit.write(user, 'draft.failed', { draftId, error: e.message });
     }
+  }
+
+  // Steps whose click positions were not recorded (screen sharing, desktop agent, older add-in): Claude
+  // proposes the markers from the screenshot and the instructions. A few at a time, at most 45 seconds
+  // in total; whatever is not ready by then is simply left without markers.
+  const locate = deps.locateMarks || locateMarks;
+  async function locateMissingMarks(doc, sessionId, user) {
+    if (!aiAvailable(cfg) || cfg.ai.locateMarks === false) return;
+    const todo = doc.steps.filter((st) => !st.marks?.length && st.screenshotIds.length && st.instructions.length).slice(0, 25);
+    if (!todo.length) return;
+    const deadline = Date.now() + 45_000;
+    const run = async (st) => {
+      const shotId = st.screenshotIds[0]; const p = store.screenshotPath(sessionId, shotId);
+      if (!p || Date.now() > deadline) return;
+      try {
+        await shotReady(sessionId, shotId);
+        const marks = await locate({ cfg, buffer: fs.readFileSync(p), instructions: st.instructions });
+        if (Date.now() <= deadline + 15_000) st.marks = marks.map((m) => ({ ...m, shotId }));
+      } catch (e) { audit.write(user, 'step.locate_marks_failed', { sessionId, error: e.message }); }
+    };
+    const queue = [...todo];
+    await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => { while (queue.length) await run(queue.shift()); }));
   }
 
   // ---------------------------------------------------------------- drafts / review / approval / publishing
@@ -498,6 +523,21 @@ export function createApp(cfg, deps = {}) {
     if (!s) { const keep = shotsUsedByDrafts(d.sessionId); for (const id of store.listScreenshots(d.sessionId)) if (!keep.has(id)) store.deleteScreenshot(d.sessionId, id); }
     audit.write(req.user, 'draft.deleted', { draftId: d.id, sessionId: d.sessionId, status: d.status, title: d.doc?.info.title });
     res.json({ ok: true });
+  }));
+
+  // Proposes click markers for one screenshot (used by the screenshot editor's "Suggest with AI").
+  app.post('/api/drafts/:id/locate-marks', wrap(async (req, res) => {
+    const d = loadDraft(req);
+    if (!aiAvailable(cfg)) throw httpError(400, 'Suggesting markers needs the AI engine. Add them by clicking on the screenshot instead.');
+    const shotId = String(req.body?.shotId || '');
+    const instructions = (Array.isArray(req.body?.instructions) ? req.body.instructions : []).map((x) => String(x).slice(0, 500)).slice(0, 15);
+    await shotReady(d.sessionId, shotId);
+    const p = store.screenshotPath(d.sessionId, shotId);
+    const got = p ? { buffer: fs.readFileSync(p) } : d.baseRef ? await repo.screenshot(d.baseRef.processId, shotId) : null;
+    if (!got) throw httpError(404, 'Screenshot not found');
+    const marks = await locate({ cfg, buffer: got.buffer, instructions }).catch((e) => { throw httpError(502, `The AI could not place the markers: ${e.message}`); });
+    audit.write(req.user, 'draft.marks_suggested', { draftId: d.id, shotId, count: marks.length });
+    res.json(marks.map((m) => ({ ...m, shotId })));
   }));
 
   app.put('/api/drafts/:id', wrap(async (req, res) => {
@@ -758,10 +798,11 @@ export function createApp(cfg, deps = {}) {
     await shotReady(d.sessionId, req.params.shot);
     const p = store.screenshotPath(d.sessionId, req.params.shot);
     const marks = req.query.raw ? [] : marksFor(d.doc, req.params.shot);
-    if (p && !marks.length) return res.sendFile(p);
+    const crop = req.query.raw ? null : cropFor(d.doc, req.params.shot);
+    if (p && !marks.length && !crop) return res.sendFile(p);
     const got = p ? { buffer: fs.readFileSync(p), mime: p.endsWith('.png') ? 'image/png' : 'image/jpeg' } : d.baseRef ? await repo.screenshot(d.baseRef.processId, req.params.shot) : null;
     if (!got) return res.status(404).end();
-    res.type(got.mime).send(marks.length ? await annotateImage(got.buffer, marks) : got.buffer);
+    res.type(got.mime).send(marks.length || crop ? await renderShot(got.buffer, marks, crop) : got.buffer);
   }));
 
   // ---------------------------------------------------------------- dashboard

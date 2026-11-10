@@ -218,3 +218,20 @@ details.sec { scroll-margin-top: 70px; }
 .results li { align-items: flex-start; }
 .results mark { background: #fff2b3; color: inherit; padding: 0 1px; border-radius: 2px; }
 .found { margin-top: 4px; color: #3d4f5c; }
+
+/* Screenshots with markers, and the screenshot editor */
+.marked-shot { position: relative; overflow: hidden; width: 100%; border-radius: 6px; border: 1px solid var(--line); background: #f4f6f8; cursor: zoom-in; }
+.marked-shot[role=button] { cursor: pointer; }
+.marked-inner { position: absolute; }
+.marked-inner img, .shot-canvas img { display: block; width: 100%; height: auto; border: 0; border-radius: 0; margin: 0; max-width: none; }
+.marks-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.shot-actions { display: flex; gap: 6px; margin-top: 6px; }
+.shot-editor-back { position: fixed; inset: 0; background: rgba(15,23,42,.6); z-index: 1000; display: grid; place-items: center; padding: 16px; }
+.shot-editor { background: #fff; border-radius: 12px; padding: 14px; width: min(1200px, 100%); max-height: calc(100vh - 32px); overflow: auto; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+.shot-canvas { position: relative; user-select: none; touch-action: none; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.drag-rect { position: absolute; border: 2px dashed #2fa84f; background: rgba(47,168,79,.12); pointer-events: none; }
+.drag-rect.crop { border-color: #fff; background: rgba(255,255,255,.15); box-shadow: 0 0 0 9999px rgba(15,23,42,.45); }
+.shots figure:has(.marked-shot) { width: min(760px, 100%); overflow: visible; box-shadow: none; }
+.shots .marked-shot { box-shadow: 0 4px 16px rgba(20, 33, 43, .12); border-radius: 10px; }
+.shots .marked-inner img { max-width: none; cursor: inherit; }
+.shots .shot-actions button { position: static; }

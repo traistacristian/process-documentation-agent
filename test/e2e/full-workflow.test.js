@@ -126,6 +126,30 @@ test('new process: capture real browser activity, generate, review, approve and 
   await app.getByTestId('tab-doc').click();
   await snap(app, '03-review-generated');
 
+  // Screenshot editor: add a click marker by hand and crop to the upper-left part, then save.
+  await app.getByTestId('edit-shot').first().click();
+  const canvas = app.getByTestId('shot-canvas');
+  await canvas.locator('img').waitFor();
+  const cb = await canvas.boundingBox();
+  await app.getByTestId('tool-click').click();
+  await app.mouse.click(cb.x + cb.width * 0.3, cb.y + cb.height * 0.3);
+  await app.getByTestId('tool-crop').click();
+  await app.mouse.move(cb.x + 2, cb.y + 2); await app.mouse.down();
+  await app.mouse.move(cb.x + cb.width * 0.6, cb.y + cb.height * 0.6, { steps: 5 }); await app.mouse.up();
+  if (SHOTS) await app.screenshot({ path: path.join(SHOTS, '03b-shot-editor.png') });
+  await app.getByTestId('shot-save').click();
+  await app.getByTestId('save').click();
+  await app.getByTestId('save').filter({ hasText: 'Saved' }).waitFor();
+  await app.locator('.marked-shot').first().scrollIntoViewIfNeeded();
+  if (SHOTS) await app.screenshot({ path: path.join(SHOTS, '03c-cropped.png') });
+  const edited = (await apiGet(`/api/drafts/${draftId}`)).doc.steps.find((s) => s.crops?.length);
+  assert.ok(edited, 'the crop is saved with the step');
+  assert.ok(edited.marks.length >= 2 && edited.marks.at(-1).kind === 'click', 'the hand-placed marker is saved');
+  const shotId = edited.crops[0].shotId;
+  const sizeOf = async (q) => { const r = await fetch(`${appUrl}/api/drafts/${draftId}/screenshots/${shotId}${q}`, { headers: { 'x-dev-user': 'admin' } }); const b = Buffer.from(await r.arrayBuffer()); return (await import('sharp')).default(b).metadata(); };
+  const full = await sizeOf('?raw=1'); const cut = await sizeOf('');
+  assert.ok(cut.width < full.width * 0.7 && cut.height < full.height * 0.7, `the shown screenshot is cropped (${cut.width}x${cut.height} of ${full.width}x${full.height})`);
+
   await resolveClarifications(app);
   await snap(app, '04-clarifications');
   await approveAndPublish(app);
