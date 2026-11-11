@@ -29,8 +29,11 @@ export function createAuth(cfg) {
       jwks ??= createRemoteJWKSet(new URL(`https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`));
       const { payload } = await jwtVerify(m[1], jwks, {
         issuer: [`https://login.microsoftonline.com/${tenantId}/v2.0`, `https://sts.windows.net/${tenantId}/`],
-        audience: [apiClientId, `api://${apiClientId}`],
       });
+      // The API app's own ids: its client id, api://<client id>, and api://<host>/<client id> (Teams SSO).
+      const auds = [].concat(payload.aud || []);
+      const ok = auds.some((a) => a === apiClientId || a === `api://${apiClientId}` || (a.startsWith('api://') && a.endsWith(`/${apiClientId}`) && /^api:\/\/[a-z0-9.-]+\/[0-9a-f-]+$/i.test(a)));
+      if (!ok) throw new Error('Token is not for this API');
       const roles = (payload.roles || []).map((r) => ENTRA_ROLE_MAP[r]).filter(Boolean);
       return { id: payload.oid, name: payload.name || payload.preferred_username, email: payload.preferred_username, roles };
     }

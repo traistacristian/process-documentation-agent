@@ -27,6 +27,8 @@ import { sampleDocs } from './engine/samples.js';
 import { createInviter } from './invite.js';
 import { transcribeAudio, findMeetingSuggestions, nearestFrame, speechConfigured } from './engine/meeting.js';
 import { applyAnswer } from './engine/clarify.js';
+import { teamsEnabled, createTeamsGraph, parseVtt, planFromTranscript, teamsPackage, teamsManifest, maskSpokenSecrets } from './teams.js';
+import { redactText } from './engine/redact.js';
 import { renderDocx, renderMarkdown } from './engine/render.js';
 import { createRepository } from './repo/index.js';
 import { applyRetention } from './retention.js';
@@ -52,7 +54,11 @@ export function createApp(cfg, deps = {}) {
   app.get('/healthz', (req, res) => {
     try { store.ping?.(); res.json({ ok: true }); } catch (e) { res.status(503).json({ ok: false, error: 'storage unavailable' }); }
   });
-  app.use((req, res, next) => { res.set({ 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY', ...(req.secure ? { 'strict-transport-security': 'max-age=31536000' } : {}) }); next(); });
+  // Framing: nobody, except Microsoft Teams (and Outlook / Microsoft 365, which host Teams apps) when the Teams app is set up.
+  const frame = teamsEnabled(cfg)
+    ? { 'content-security-policy': "frame-ancestors 'self' https://teams.microsoft.com https://*.teams.microsoft.com https://teams.cloud.microsoft https://*.cloud.microsoft https://*.office.com https://outlook.office.com https://*.microsoft365.com" }
+    : { 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" };
+  app.use((req, res, next) => { res.set({ 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', ...frame, ...(req.secure ? { 'strict-transport-security': 'max-age=31536000' } : {}) }); next(); });
 
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
   const notify = async (event, payload) => {
@@ -107,6 +113,7 @@ export function createApp(cfg, deps = {}) {
       repository: { mode: cfg.repository.mode, label: repo.label },
       aiEngine: engineName(),
       meetings: meetingsAvailable(),
+      teams: teamsAvailable(),
       categories: cfg.categories,
     });
   });
@@ -180,6 +187,9 @@ export function createApp(cfg, deps = {}) {
   const inviter = createInviter(cfg, { graph: deps.inviteGraph });
   const transcribe = deps.transcribeAudio || transcribeAudio;
   const meetingAnalyse = deps.findMeetingSuggestions || findMeetingSuggestions;
+  const teamsGraph = deps.teamsGraph || (teamsEnabled(cfg) ? createTeamsGraph(cfg) : null);
+  const teamsPlan = deps.planFromTranscript || planFromTranscript;
+  const teamsAvailable = () => !!teamsGraph && (!!deps.planFromTranscript || aiAvailable(cfg));
   const meetingsAvailable = () => (!!deps.transcribeAudio || speechConfigured(cfg)) && (!!deps.findMeetingSuggestions || aiAvailable(cfg));
   const scriptCache = new Map(); // processId@version -> script (each draft costs an AI call)
   const privacyJobs = new Map();
@@ -595,8 +605,21 @@ export function createApp(cfg, deps = {}) {
       const transcript = fs.existsSync(audioPath(mid)) && fs.statSync(audioPath(mid)).size > 0 ? await transcribe({ cfg, path: audioPath(mid), language: lang }) : [];
       update((m) => { m.transcript = transcript; m.status = 'analysing'; });
       fs.rmSync(audioPath(mid), { force: true }); // privacy: only the transcript is kept
+    } catch (e) {
+      update((m) => { m.status = 'failed'; m.error = e.message; });
+      fs.rmSync(audioPath(mid), { force: true });
+      audit.write(null, 'meeting.failed', { draftId, meetingId: mid, error: e.message });
+      return;
+    }
+    await analyseMeeting(draftId, mid);
+  }
+
+  async function analyseMeeting(draftId, mid) {
+    const update = (fn) => { const d = store.get('drafts', draftId); const m = d?.meetings?.find((x) => x.id === mid); if (!m) return null; fn(m, d); store.put('drafts', d); return { d, m }; };
+    try {
       const now = store.get('drafts', draftId); const meeting = now.meetings.find((x) => x.id === mid);
       await Promise.all(meeting.frames.map((f) => Promise.resolve(shotReady(now.sessionId, f.id)).catch(() => {})));
+      const { transcript } = meeting;
       const found = transcript.length ? await meetingAnalyse({ cfg, doc: now.doc, clarifications: now.clarifications, transcript }) : [];
       update((m) => {
         m.suggestions = found.map((x, i) => {
@@ -609,7 +632,6 @@ export function createApp(cfg, deps = {}) {
       audit.write(null, 'meeting.analysed', { draftId, meetingId: mid, suggestions: found.length, transcriptLines: transcript.length });
     } catch (e) {
       update((m) => { m.status = 'failed'; m.error = e.message; });
-      fs.rmSync(audioPath(mid), { force: true });
       audit.write(null, 'meeting.failed', { draftId, meetingId: mid, error: e.message });
     }
   }
@@ -663,6 +685,7 @@ export function createApp(cfg, deps = {}) {
     const action = req.body?.action;
     if (!['accept', 'reject'].includes(action)) throw httpError(400, 'action must be accept or reject');
     const text = String(req.body?.text ?? sg.text).trim();
+    const sectionsBefore = new Set((d.comparison?.sectionChanges || []).map((x) => x.id));
     if (action === 'accept') {
       const tag = `meeting ${new Date(m.startedAt).toISOString().slice(0, 10)}`;
       if (sg.kind === 'topic') {
@@ -684,7 +707,14 @@ export function createApp(cfg, deps = {}) {
         for (const o of m.suggestions) if (o !== sg && o.status === 'open' && o.stepNumber != null && o.stepNumber > at) o.stepNumber += 1;
       }
       d.doc = normalizeDoc(d.doc);
-      if (d.baseDoc) d.comparison = compareDocs(d.baseDoc, d.doc);
+      if (d.baseDoc) {
+        d.comparison = compareDocs(d.baseDoc, d.doc);
+        // The reviewer just accepted this change; it needs no second decision against the published version.
+        const touched = sg.kind === 'note' ? d.doc.steps.find((x) => x.number === sg.stepNumber) : sg.kind === 'step' ? d.doc.steps[Math.min(Math.max(0, sg.stepNumber ?? d.doc.steps.length), d.doc.steps.length - 1)] : null;
+        const chg = touched && d.comparison.changes.find((x) => x.newIndex === touched.number - 1 && ['modified', 'added'].includes(x.kind));
+        if (chg) d.decisions = { ...d.decisions, [chg.id]: 'accept' };
+        for (const sc of d.comparison.sectionChanges) if (!sectionsBefore.has(sc.id)) d.decisions = { ...d.decisions, [sc.id]: 'accept' };
+      }
     }
     sg.status = action === 'accept' ? 'accepted' : 'rejected'; sg.decidedBy = req.user.name;
     if (d.status === 'rejected') d.status = 'draft';
@@ -692,6 +722,106 @@ export function createApp(cfg, deps = {}) {
     store.put('drafts', d);
     audit.write(req.user, `meeting.suggestion_${sg.status}`, { draftId: d.id, meetingId: m.id, kind: sg.kind });
     res.json(draftView(d));
+  }));
+
+  // ---------------------------------------------------------------- Teams meeting transcripts
+  // Read on behalf of the signed-in person (their own token is the on-behalf-of assertion), so only
+  // meetings they may read are reachable. The transcript is kept with the import (secrets redacted)
+  // so drafts can be made from it; deleting the import deletes it.
+  const teamsHost = (req) => (cfg.publicUrl ? new URL(cfg.publicUrl).host : req.get('host'));
+  const userToken = (req) => (/^Bearer (.+)$/.exec(req.get('authorization') || '') || [])[1] || '';
+  const needTeams = () => { if (!teamsAvailable()) throw httpError(409, 'Teams transcripts are not set up. An administrator runs scripts/Enable-TeamsApp.ps1 once.', 'NOT_AVAILABLE'); };
+  const importView = (x) => { const { transcript, ...rest } = x; return { ...rest, transcriptLines: transcript?.length || 0 }; };
+  const loadImport = (req) => {
+    const x = store.get('imports', req.params.iid);
+    if (!x || !(x.createdBy.id === req.user.id || req.user.roles.includes(ROLES.ADMIN))) throw httpError(404, 'Import not found');
+    return x;
+  };
+
+  app.get('/api/teams/meeting', requireRole(ROLES.CONTRIBUTOR), wrap(async (req, res) => {
+    needTeams();
+    const joinUrl = String(req.query.joinUrl || '').trim().slice(0, 2000); const chatId = String(req.query.chatId || '').trim().slice(0, 300);
+    if (!joinUrl && !chatId) throw httpError(400, 'Paste the meeting link');
+    if (joinUrl && !/^https:\/\/([a-z0-9-]+\.)*(teams\.microsoft\.com|teams\.live\.com|teams\.cloud\.microsoft)\//i.test(joinUrl)) throw httpError(400, 'This is not a Teams meeting link');
+    const meeting = await teamsGraph.findMeeting(userToken(req), { joinUrl, chatId, userId: req.user.id });
+    const transcripts = await teamsGraph.transcripts(userToken(req), meeting.id);
+    res.json({ ...meeting, transcripts });
+  }));
+  app.get('/api/teams/imports', requireRole(ROLES.CONTRIBUTOR), (req, res) => {
+    res.json(store.list('imports').filter((x) => x.createdBy.id === req.user.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 50).map(importView));
+  });
+  app.get('/api/teams/imports/:iid', requireRole(ROLES.CONTRIBUTOR), (req, res) => res.json(importView(loadImport(req))));
+  app.delete('/api/teams/imports/:iid', requireRole(ROLES.CONTRIBUTOR), (req, res) => {
+    const x = loadImport(req); store.remove('imports', x.id);
+    audit.write(req.user, 'teams.import_deleted', { importId: x.id });
+    res.json({ ok: true });
+  });
+  app.post('/api/teams/imports', requireRole(ROLES.CONTRIBUTOR), wrap(async (req, res) => {
+    needTeams();
+    const b = req.body || {};
+    const meetingId = String(b.meetingId || ''); const transcriptId = String(b.transcriptId || '');
+    if (!meetingId || !transcriptId) throw httpError(400, 'Choose a meeting transcript');
+    const vtt = await teamsGraph.content(userToken(req), meetingId, transcriptId);
+    const transcript = parseVtt(vtt).map((p) => ({ ...p, text: maskSpokenSecrets(redactText(p.text, { maskEmails: true })) }));
+    if (!transcript.length) throw httpError(422, 'The transcript is empty.');
+    try { await searchIndex.refresh(); } catch { /* use what is indexed */ }
+    const library = searchIndex.list();
+    const plan = await teamsPlan({ cfg, transcript, library, subject: b.subject }).catch((e) => { throw httpError(502, `The meeting could not be analysed: ${e.message}`); });
+    const x = {
+      id: newId('imp'), createdBy: { id: req.user.id, name: req.user.name }, createdAt: Date.now(), meetingId, transcriptId,
+      subject: String(b.subject || '').slice(0, 300), startDateTime: b.startDateTime || null, language: b.language === 'de' ? 'de' : 'en',
+      summary: plan.summary, items: plan.items.map((it, i) => ({ ...it, n: i + 1, atMs: Math.max(0, Math.round(it.atSeconds * 1000)), status: 'open', draftId: null })), transcript,
+    };
+    store.put('imports', x);
+    audit.write(req.user, 'teams.transcript_imported', { importId: x.id, lines: transcript.length, items: x.items.length });
+    res.status(201).json(importView(x));
+  }));
+  app.post('/api/teams/imports/:iid/items/:n', requireRole(ROLES.CONTRIBUTOR), wrap(async (req, res) => {
+    const x = loadImport(req);
+    const it = x.items.find((i) => String(i.n) === req.params.n);
+    if (!it) throw httpError(404, 'Item not found');
+    if (req.body?.action === 'dismiss') { it.status = 'dismissed'; store.put('imports', x); return res.json(importView(x)); }
+    if (req.body?.action !== 'draft') throw httpError(400, 'action must be draft or dismiss');
+    if (it.draftId && store.get('drafts', it.draftId)) return res.json(importView(x));
+    const label = `Teams meeting "${x.subject || 'without subject'}"${x.startDateTime ? ` on ${String(x.startDateTime).slice(0, 10)}` : ''}`;
+    const base = { createdBy: { id: req.user.id, name: req.user.name }, startedAt: Date.now(), stoppedAt: Date.now(), pausedMs: 0, pausedAt: null, clients: [], source: 'teams', importId: x.id, consent: { acceptedAt: Date.now(), text: `Imported from the transcript of the ${label}.` } };
+    let draft;
+    if (it.action === 'update') {
+      const p = await repo.get(it.processId);
+      if (!p) throw httpError(404, 'The document is no longer in the library');
+      const meta = { title: p.doc.info.title, description: '', department: p.doc.info.department, owner: p.doc.info.owner, category: p.doc.info.category, language: p.doc.info.language || 'en' };
+      const s = { id: newId('ses'), mode: 'update', meta, baseRef: { processId: p.doc.info.processId, version: p.doc.info.version, etag: p.etag, doc: p.doc }, status: 'generated', eventCount: 0, ...base };
+      store.put('sessions', s);
+      const doc = normalizeDoc(structuredClone(p.doc));
+      const mid = newId('mtg');
+      draft = {
+        id: newId('drf'), sessionId: s.id, mode: 'update', status: 'draft', engine: 'teams-transcript', createdBy: base.createdBy, createdAt: Date.now(), updatedAt: Date.now(),
+        baseRef: { processId: p.doc.info.processId, version: p.doc.info.version, etag: p.etag }, baseDoc: p.doc, doc, clarifications: [], suggestions: [`Opened to update from the ${label}. See "From the meeting" for what the meeting adds.`], comparison: compareDocs(p.doc, doc), decisions: {}, history: [{ ts: Date.now(), user: req.user.name, action: `opened from the ${label}` }],
+        meetings: [{ id: mid, source: 'teams', subject: x.subject, status: 'analysing', startedAt: x.startDateTime ? Date.parse(x.startDateTime) || Date.now() : Date.now(), startedBy: req.user.name, frames: [], audioBytes: 0, transcript: x.transcript, suggestions: [] }],
+      };
+      s.draftId = draft.id; store.put('sessions', s); store.put('drafts', draft);
+      analyseMeeting(draft.id, mid);
+    } else {
+      const meta = { title: it.title, description: `${it.reason} Drafted from the transcript of the ${label}; the recording below is the meeting transcript, one note per statement.`, department: '', owner: '', category: '', language: x.language, fileName: cleanFileName(it.title) };
+      const s = { id: newId('ses'), mode: 'new', meta, baseRef: null, status: 'generated', eventCount: 0, ...base };
+      store.put('sessions', s);
+      const t0 = x.startDateTime ? Date.parse(x.startDateTime) || Date.now() : Date.now();
+      store.appendEvents(s.id, [{ type: 'start', ts: t0, source: 'teams' }, ...x.transcript.map((l) => ({ type: 'note', ts: t0 + l.ms, source: 'teams', text: `${l.speaker ? `${l.speaker}: ` : ''}${l.text}`.slice(0, 1000) })), { type: 'stop', ts: t0 + (x.transcript.at(-1)?.ms || 0) + 1000, source: 'teams' }]);
+      const events = store.readEvents(s.id);
+      draft = { id: newId('drf'), sessionId: s.id, mode: 'new', status: 'generating', engine: null, createdBy: base.createdBy, createdAt: Date.now(), updatedAt: Date.now(), baseRef: null, baseDoc: null, doc: null, clarifications: [], suggestions: [], comparison: null, decisions: {}, history: [{ ts: Date.now(), user: req.user.name, action: `drafted from the ${label}` }] };
+      store.put('drafts', draft);
+      s.draftId = draft.id; s.eventCount = events.length; store.put('sessions', s);
+      runGeneration(draft.id, s, events, req.user).catch(() => {});
+    }
+    it.status = 'drafted'; it.draftId = draft.id; store.put('imports', x);
+    audit.write(req.user, 'teams.draft_created', { importId: x.id, draftId: draft.id, action: it.action, processId: it.processId });
+    res.json(importView(x));
+  }));
+  app.get('/api/admin/teams/manifest', requireRole(ROLES.ADMIN), (req, res) => res.json({ available: teamsEnabled(cfg) || !!deps.teamsGraph, manifest: teamsManifest(cfg, teamsHost(req)) }));
+  app.get('/api/admin/teams/package', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
+    if (cfg.auth.mode !== 'entra' && !deps.teamsGraph) throw httpError(409, 'The Teams app needs Microsoft sign-in (Entra ID mode).');
+    audit.write(req.user, 'teams.package_downloaded', {});
+    res.attachment('process-documentation-agent-teams.zip').type('application/zip').send(await teamsPackage(cfg, teamsHost(req)));
   }));
 
   app.post('/api/drafts/:id/approve', requireRole(ROLES.APPROVER), wrap(async (req, res) => {

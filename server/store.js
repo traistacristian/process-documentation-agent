@@ -12,7 +12,7 @@ export const newId = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('he
 export class Store {
   constructor(dataDir) {
     this.dir = dataDir;
-    for (const d of ['sessions', 'drafts', 'screenshots']) fs.mkdirSync(path.join(dataDir, d), { recursive: true });
+    for (const d of ['sessions', 'drafts', 'screenshots', 'imports']) fs.mkdirSync(path.join(dataDir, d), { recursive: true });
     this.seqCache = new Map();
   }
 

@@ -2,9 +2,25 @@
 // an access token for the API is acquired with MSAL and sent as a Bearer token.
 let config = null;
 let msal = null;
+// Inside Microsoft Teams (the Teams app opens the app with ?inTeams=1) sign-in is Teams SSO: Teams
+// hands out a token for the API without a second login, so MSAL is not used there.
+let teams = null; // { sdk, context }
+const wantsTeams = () => { try { return new URLSearchParams(location.search).get('inTeams') === '1'; } catch { return false; } };
+export const inTeams = () => !!teams;
+export const teamsContext = () => teams?.context || null;
+export const teamsSdk = () => teams?.sdk || null;
 
 export async function loadConfig() {
   config = await (await fetch('/api/config')).json();
+  if (config.authMode === 'entra' && wantsTeams()) {
+    const sdk = await import('@microsoft/teams-js');
+    await Promise.race([sdk.app.initialize(), new Promise((_, rej) => setTimeout(() => rej(new Error('Open this page from the Teams app.')), 10_000))]);
+    teams = { sdk, context: await sdk.app.getContext() };
+    sdk.app.notifySuccess();
+    document.documentElement.classList.add('in-teams');
+    if (['sidePanel', 'meetingStage'].includes(teams.context.page?.frameContext)) document.documentElement.classList.add('teams-panel');
+    return config;
+  }
   if (config.authMode === 'entra') {
     const { PublicClientApplication } = await import('@azure/msal-browser');
     msal = new PublicClientApplication({ auth: { clientId: config.entra.clientId, authority: `https://login.microsoftonline.com/${config.entra.tenantId}`, redirectUri: location.origin }, cache: { cacheLocation: 'sessionStorage' } });
@@ -20,7 +36,7 @@ export async function loadConfig() {
 }
 
 export const getConfig = () => config;
-export const currentAccount = () => msal?.getActiveAccount() || null;
+export const currentAccount = () => (teams ? { name: teams.context.user?.displayName || teams.context.user?.userPrincipalName, username: teams.context.user?.userPrincipalName } : msal?.getActiveAccount() || null);
 // Signs out of the app. Entra: ends the Microsoft session for this app and returns to the start page.
 // Demo mode: shows the signed-out screen until "Sign in" is clicked.
 export async function signOut() {
@@ -39,6 +55,7 @@ export const devUser = () => { try { return localStorage.getItem('pda.devUser') 
 export const setDevUser = (id) => { try { localStorage.setItem('pda.devUser', id); } catch { /* ignore */ } };
 
 async function headers() {
+  if (teams) return { authorization: `Bearer ${await teams.sdk.authentication.getAuthToken()}` };
   if (config?.authMode === 'entra') {
     const t = await msal.acquireTokenSilent({ scopes: [config.entra.scope] }).catch(() => msal.acquireTokenRedirect({ scopes: [config.entra.scope] }));
     return { authorization: `Bearer ${t.accessToken}` };

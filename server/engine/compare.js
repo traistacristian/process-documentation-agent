@@ -106,7 +106,7 @@ export function compareDocs(oldDoc, newDoc) {
     if (op.oldIndex !== null && op.newIndex !== null) {
       const o = oldSteps[op.oldIndex]; const s = newSteps[op.newIndex];
       const diffs = fieldChanges(o, s);
-      const kind = op.sim >= UNCHANGED && !diffs.some((d) => ['title', 'instructions', 'application'].includes(d.field)) ? 'unchanged' : 'modified';
+      const kind = op.sim >= UNCHANGED && !diffs.some((d) => ['title', 'instructions', 'application', 'notes', 'warnings'].includes(d.field)) ? 'unchanged' : 'modified';
       changes.push({ id: sid('step', o, s), kind, oldIndex: op.oldIndex, newIndex: op.newIndex, oldNumber: o.number, newNumber: s.number, similarity: round(op.sim), title: s.title, oldTitle: o.title, fields: kind === 'unchanged' ? diffs : diffs, renumbered: o.number !== s.number });
     } else if (op.oldIndex !== null) {
       const o = oldSteps[op.oldIndex];

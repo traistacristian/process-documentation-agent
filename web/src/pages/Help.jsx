@@ -6,6 +6,7 @@ const ROLES = [
   ['Admin', 'Everything an Approver can, plus settings, demo content and inviting people.'],
 ];
 const FAQ = [
+  ['Can I document a process from a Teams meeting?', 'Yes. After a meeting with transcription switched on, open "From Teams" (or the Process Docs side panel in the meeting) and choose Analyse. The agent suggests which documents to update, which new ones to draft and which topics were unclear. Only the organiser or a co-organiser can import a transcript, and nothing changes until you accept it in a draft.'],
   ['Is my password recorded?', 'No. Password fields are never read, and names, e-mail addresses and phone numbers are blurred in the screenshots before anyone sees them.'],
   ['What if I make a mistake while recording?', 'Pause, or just carry on. You can delete, move or rewrite any step in the review before it is approved.'],
   ['Where do the documents go?', 'After approval they are published as Word files to SharePoint, in English and German, with every earlier version kept.'],

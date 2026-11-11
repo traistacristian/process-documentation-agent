@@ -63,5 +63,6 @@
   "notifications": { "webhookUrl": "" },
   "speech": { "endpoint": "" },
   "meetings": { "maxFrames": 400, "maxAudioMb": 200 },
+  "teams": { "miClientId": "", "developerName": "Process Documentation Agent", "appVersion": "1.0.0" },
   "invitations": { "groups": { "Contributor": "", "Approver": "", "Admin": "" } }
 }

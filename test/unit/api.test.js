@@ -337,3 +337,71 @@ test('meetings: audio and screenshots are recorded, transcribed and turned into 
     assert.equal((await c('GET', `/api/drafts/${d.id}/screenshots/${f2.id}`)).status, 200, 'meeting screenshots are served like recorded ones');
   } finally { s3.close(); fs.rmSync(d3, { recursive: true, force: true }); }
 });
+
+test('Teams: a meeting transcript is analysed and turned into an update draft and a new draft', async () => {
+  const d4 = fs.mkdtempSync(path.join(os.tmpdir(), 'pda-teams-'));
+  const c4 = loadConfig({ dataDir: d4, ai: { provider: 'rules' } }); c4.repository.local.path = path.join(d4, 'repository');
+  let seenLibrary = null; const tokens = [];
+  const vtt = 'WEBVTT\n\n00:00:05.000 --> 00:00:09.000\n<v Dana>When you reset a password, also check the sign-in log afterwards. The password is Secret123!\n\n00:01:10.000 --> 00:01:20.000\n<v Sam>For guest accounts we open Entra, External Identities, and resend the invitation.\n';
+  const a4 = createApp(c4, {
+    teamsGraph: {
+      findMeeting: async (tok, q) => { tokens.push(tok); assert.ok(q.joinUrl || q.chatId); return { id: 'MSo-m1', subject: 'Service desk walkthrough', startDateTime: '2026-11-10T09:00:00Z' }; },
+      transcripts: async () => [{ id: 't1', createdDateTime: '2026-11-10T10:00:00Z' }],
+      content: async () => vtt,
+    },
+    planFromTranscript: async ({ library, transcript }) => {
+      seenLibrary = library;
+      const reset = library.find((p) => /password/i.test(p.title));
+      assert.ok(!transcript.map((l) => l.text).join(' ').includes('Secret123!'), 'secrets are masked before the AI sees them');
+      return { summary: 'Password resets and guest invitations.', items: [
+        { action: 'update', processId: reset.processId, title: reset.title, reason: 'Adds a check of the sign-in log.', quote: 'also check the sign-in log', atSeconds: 5 },
+        { action: 'new', processId: null, title: 'Resend a guest invitation', reason: 'The steps were explained.', quote: 'resend the invitation', atSeconds: 70 },
+        { action: 'topic', processId: null, title: 'Remove guest accounts', reason: 'Nobody knew.', quote: '', atSeconds: 75 },
+      ] };
+    },
+    findMeetingSuggestions: async ({ transcript }) => [{ kind: 'note', clarificationId: null, stepNumber: 5, title: null, text: 'Check the sign-in log after the reset.', instructions: [], quote: 'also check the sign-in log', atSeconds: transcript[0].ms / 1000 }],
+  });
+  const s4 = http.createServer(a4); await new Promise((r) => s4.listen(0, '127.0.0.1', r));
+  const b4 = `http://127.0.0.1:${s4.address().port}`;
+  const c = async (method, p, body, user = 'alex') => { const r = await fetch(b4 + p, { method, headers: { 'content-type': 'application/json', 'x-dev-user': user }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: r.headers.get('content-type')?.includes('json') ? await r.json() : null }; };
+  try {
+    assert.equal((await c('GET', '/api/config')).body.teams, true);
+    assert.ok((await c('POST', '/api/admin/samples', {}, 'admin')).status < 300);
+    assert.equal((await c('GET', '/api/teams/meeting?joinUrl=https://evil.example/x')).status, 400);
+    const m = (await c('GET', `/api/teams/meeting?joinUrl=${encodeURIComponent('https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0')}`)).body;
+    assert.equal(m.subject, 'Service desk walkthrough'); assert.equal(m.transcripts.length, 1);
+    const imp = await c('POST', '/api/teams/imports', { meetingId: m.id, transcriptId: m.transcripts[0].id, subject: m.subject, startDateTime: m.startDateTime });
+    assert.equal(imp.status, 201, JSON.stringify(imp.body));
+    const x = imp.body;
+    assert.equal(x.transcript, undefined, 'the transcript is not sent to the browser');
+    assert.equal(x.transcriptLines, 2);
+    assert.ok(seenLibrary.length >= 4);
+    assert.equal(x.items.length, 3);
+    assert.equal((await c('GET', `/api/teams/imports/${x.id}`, null, 'sam')).status, 404, 'only the importer sees it');
+
+    // Update an existing document: a draft based on the published version, with the meeting's suggestions.
+    let r = (await c('POST', `/api/teams/imports/${x.id}/items/1`, { action: 'draft' })).body;
+    const upd = r.items[0].draftId; assert.ok(upd);
+    let d; for (let i = 0; i < 50; i++) { d = (await c('GET', `/api/drafts/${upd}`)).body; if (d.meetings[0].status === 'done') break; await new Promise((res) => setTimeout(res, 50)); }
+    assert.equal(d.mode, 'update'); assert.ok(d.baseRef.processId);
+    assert.equal(d.meetings[0].source, 'teams'); assert.equal(d.meetings[0].suggestions.length, 1);
+    d = (await c('POST', `/api/drafts/${upd}/meetings/${d.meetings[0].id}/suggestions/${d.meetings[0].suggestions[0].id}`, { action: 'accept' })).body;
+    assert.ok(d.doc.steps[4].notes.includes('Check the sign-in log after the reset.'));
+    assert.equal(d.pending.length, 0, 'accepting the suggestion is the decision');
+    assert.ok(d.mergedDoc.steps[4].notes.includes('Check the sign-in log after the reset.'), 'the accepted note survives the merge with the published version');
+    // Asking again returns the same draft.
+    assert.equal((await c('POST', `/api/teams/imports/${x.id}/items/1`, { action: 'draft' })).body.items[0].draftId, upd);
+
+    // New document: drafted from the transcript.
+    r = (await c('POST', `/api/teams/imports/${x.id}/items/2`, { action: 'draft' })).body;
+    let n; for (let i = 0; i < 50; i++) { n = (await c('GET', `/api/drafts/${r.items[1].draftId}`)).body; if (n.status !== 'generating') break; await new Promise((res) => setTimeout(res, 50)); }
+    assert.equal(n.mode, 'new'); assert.equal(n.status, 'draft', n.error);
+    assert.equal(n.doc.info.title, 'Resend a guest invitation');
+
+    r = (await c('POST', `/api/teams/imports/${x.id}/items/3`, { action: 'dismiss' })).body;
+    assert.equal(r.items[2].status, 'dismissed');
+    assert.equal((await c('GET', '/api/teams/imports')).body.length, 1);
+    assert.equal((await c('GET', '/api/admin/teams/package', null, 'alex')).status, 403);
+    assert.equal((await c('DELETE', `/api/teams/imports/${x.id}`)).status, 200);
+  } finally { s4.close(); fs.rmSync(d4, { recursive: true, force: true }); }
+});

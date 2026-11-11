@@ -30,15 +30,15 @@ export default function MeetingPanel({ d, shotUrl, onDecide, readOnly, busy, dir
       {meetings.map((m) => (
         <div key={m.id} className="panel" data-testid="meeting">
           <div className="row between">
-            <h2 style={{ margin: 0 }}>Meeting on {fmtDate(m.startedAt)}</h2>
-            <span className="small muted">started by {m.startedBy} · {m.frames.length} screenshots{m.stoppedAt ? ` · ${mmss(m.stoppedAt - m.startedAt)} long` : ''}</span>
+            <h2 style={{ margin: 0 }}>{m.source === 'teams' ? `Teams meeting${m.subject ? ` “${m.subject}”` : ''} on ${fmtDate(m.startedAt)}` : `Meeting on ${fmtDate(m.startedAt)}`}</h2>
+            <span className="small muted">{m.source === 'teams' ? `imported by ${m.startedBy} from the Teams transcript` : `started by ${m.startedBy} · ${m.frames.length} screenshots${m.stoppedAt ? ` · ${mmss(m.stoppedAt - m.startedAt)} long` : ''}`}</span>
           </div>
           {m.status === 'recording' && <p className="small">Recording is still running. <a href={`#/meeting/${d.id}`}>Open the recording</a></p>}
           {['transcribing', 'analysing'].includes(m.status) && <div className="row" style={{ marginTop: 12 }}><span className="spinner" /><span>{m.status === 'transcribing' ? 'Transcribing the conversation…' : 'Looking for answers, missing steps and unclear topics…'}</span></div>}
           {m.status === 'failed' && <div className="alert err" style={{ marginTop: 12 }}>The meeting could not be analysed: {m.error}</div>}
           {m.status === 'done' && (
             <>
-              <p className="small muted">{m.suggestions.length ? `${m.suggestions.filter((s) => s.status === 'open').length} of ${m.suggestions.length} suggestions still to decide.` : 'The meeting did not add anything new to this draft.'} The audio was deleted after transcription.</p>
+              <p className="small muted">{m.suggestions.length ? `${m.suggestions.filter((s) => s.status === 'open').length} of ${m.suggestions.length} suggestions still to decide.` : 'The meeting did not add anything new to this draft.'} {m.source === 'teams' ? '' : 'The audio was deleted after transcription.'}</p>
               {dirty && <div className="alert warn small">Save your edits first, then accept suggestions.</div>}
               {GROUPS.map(([kind, label]) => {
                 const items = m.suggestions.filter((s) => s.kind === kind);

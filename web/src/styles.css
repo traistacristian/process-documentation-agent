@@ -235,3 +235,15 @@ details.sec { scroll-margin-top: 70px; }
 .shots .marked-shot { box-shadow: 0 4px 16px rgba(20, 33, 43, .12); border-radius: 10px; }
 .shots .marked-inner img { max-width: none; cursor: inherit; }
 .shots .shot-actions button { position: static; }
+
+/* Microsoft Teams */
+.linklike { background: none; border: 0; padding: 0; color: var(--brand, #0b6e66); text-decoration: underline; cursor: pointer; font: inherit; }
+.teams .step a, a.step { color: inherit; text-decoration: none; }
+html.in-teams .acct .acct-name, html.in-teams .topbar .logo small { display: none; }
+html.teams-panel .topbar nav, html.teams-panel .topbar .spacer, html.teams-panel .rec-pill, html.teams-panel .backbar .crumbs { display: none; }
+html.teams-panel .topbar { padding: 8px 12px; }
+html.teams-panel main { padding: 10px; }
+html.teams-panel .panel { padding: 14px; }
+html.teams-panel .row { flex-wrap: wrap; }
+html.teams-panel .topbar .logo > span:not(.mark), html.teams-panel .devswitch, html.teams-panel .invite { display: none; }
+html.teams-panel .topbar { justify-content: space-between; }

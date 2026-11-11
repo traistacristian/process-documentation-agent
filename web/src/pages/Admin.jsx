@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, refreshConfig } from '../api.js';
+import { api, refreshConfig, download, getConfig } from '../api.js';
 import { fmtDate } from '../util.jsx';
 
 const lines = (a) => (a || []).join('\n');
@@ -56,6 +56,26 @@ function Testers() {
   );
 }
 
+// The Teams app: one package to upload, plus the one-time Entra setup.
+function TeamsSetup() {
+  const [err, setErr] = useState(null); const on = getConfig().teams; const entra = getConfig().authMode === 'entra';
+  return (
+    <div className="panel" data-testid="teams-setup">
+      <h2>Microsoft Teams</h2>
+      <p className="small muted">Use the agent as a Teams app (personal app and meeting side panel) and turn meeting transcripts into new or updated work instructions. Transcripts are read on behalf of the signed-in person only: no tenant-wide access, no secrets.</p>
+      <div className="kv"><div>Transcripts</div><div>{on ? <span className="badge published">ready</span> : <span className="badge">not set up</span>}</div></div>
+      <ol className="small" style={{ margin: '8px 0', paddingLeft: 18 }}>
+        <li>Run <code>scripts/Enable-TeamsApp.ps1 -WebAppName &lt;app&gt;</code> once as an administrator (Teams sign-in, consent, keyless credential).</li>
+        <li>Download the app package and upload it in the Teams admin center → Teams apps → Manage apps → Upload new app.</li>
+        <li>Make sure transcription is allowed in the Teams meeting policy.</li>
+      </ol>
+      <button className="btn" disabled={!entra} onClick={() => download('/api/admin/teams/package', 'process-documentation-agent-teams.zip').catch((e) => setErr(e.message))} data-testid="teams-package">⬇ Download the Teams app package</button>
+      {!entra && <p className="small muted">Needs Microsoft sign-in (Entra ID mode).</p>}
+      {err && <div className="alert err small">{err}</div>}
+    </div>
+  );
+}
+
 export default function Admin() {
   const [s, setS] = useState(null); const [repo, setRepo] = useState(null); const [audit, setAudit] = useState([]);
   const [f, setF] = useState(null); const [msg, setMsg] = useState(null); const [err, setErr] = useState(null);
@@ -100,6 +120,7 @@ export default function Admin() {
           <p className="small muted">For presentations and first tests: publishes four realistic sample work instructions, so the home page and the library are not empty. They are marked with the category "Sample".</p>
           <button className="btn" onClick={samples} data-testid="add-samples">Add sample processes</button>
         </div>
+        <TeamsSetup />
         <div className="panel">
           <h2>Process categories</h2>
           <p className="small muted">Used as folders in the document library and as a metadata value. One per line.</p>

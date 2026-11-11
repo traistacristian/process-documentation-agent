@@ -44,6 +44,7 @@ export function loadConfig(overrides = {}) {
   if (env.ANTHROPIC_EFFORT) cfg.ai.effort = env.ANTHROPIC_EFFORT;
   if (env.PDA_AI_DESCRIBE_STEPS) cfg.ai.describeSteps = env.PDA_AI_DESCRIBE_STEPS !== 'false';
   if (env.ANTHROPIC_FOUNDRY_RESOURCE) cfg.ai.foundry = { ...(cfg.ai.foundry || {}), resource: env.ANTHROPIC_FOUNDRY_RESOURCE };
+  if (env.TEAMS_MI_CLIENT_ID) cfg.teams = { ...(cfg.teams || {}), miClientId: env.TEAMS_MI_CLIENT_ID };
   if (env.PDA_PUBLIC_URL) cfg.publicUrl = env.PDA_PUBLIC_URL;
   if (env.AZURE_SPEECH_ENDPOINT) cfg.speech = { ...(cfg.speech || {}), endpoint: env.AZURE_SPEECH_ENDPOINT };
   if (env.AZURE_SPEECH_KEY) cfg.speech = { ...(cfg.speech || {}), key: env.AZURE_SPEECH_KEY };

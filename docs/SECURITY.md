@@ -49,3 +49,13 @@ Administration → Testers lets an Admin invite people outside the organisation 
 | `GroupMember.ReadWrite.All` | Add the guest to the role group, remove them again | Tenant-wide. The app only uses the three group ids saved in the settings, and only removes guests, never members of your organisation. Revoke with `Grant-InvitePermissions.ps1 -Remove`. |
 
 Guests need no licence. Guest invitations must be allowed in the External collaboration settings. Assigning app roles to groups needs Microsoft Entra ID P1.
+
+## Microsoft Teams app and meeting transcripts (optional)
+
+`scripts/Enable-TeamsApp.ps1` sets this up; Administration → Microsoft Teams downloads the app package for the Teams admin center.
+
+- **Delegated access only.** Transcripts are read on behalf of the signed-in person (on-behalf-of flow) with `OnlineMeetings.Read` and `OnlineMeetingTranscript.Read.All` (delegated, admin consent). The app can only reach meetings that person may read, in practice meetings they organised. There is no application permission, no `getAllTranscripts`, no application access policy and no access to calendars or chats.
+- **No secret.** The on-behalf-of exchange authenticates the API app registration with a federated identity credential that trusts the App Service's user-assigned managed identity (`<prefix>-id-<suffix>`). The identity has no other role.
+- **Teams sign-in.** The Teams clients are pre-authorised for the API's `access_as_user` scope; the API accepts its token audience `api://<host>/<client id>` in addition to the existing ones. The app can be framed only by Teams and Microsoft 365 hosts (`frame-ancestors`), and by nothing at all when the Teams app is not set up.
+- **What is stored.** The parsed transcript is stored with the import (spoken passwords, tokens and e-mail addresses masked) so drafts can be made from it; the importer can delete it. Every import and draft is in the audit log.
+- **Tenant controls still apply.** If Graph access to transcripts is switched off for apps (`GraphAccessToTranscriptsDisabled`), imports fail with a clear message. `-Remove` undoes the setup.

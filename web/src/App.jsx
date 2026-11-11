@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, getConfig, devUser, setDevUser, signOut, isSignedOut, signIn } from './api.js';
+import { api, getConfig, devUser, setDevUser, signOut, isSignedOut, signIn, inTeams } from './api.js';
 import { usePoll } from './util.jsx';
 import Landing from './pages/Landing.jsx';
 import NewProcess from './pages/NewProcess.jsx';
@@ -10,6 +10,7 @@ import Admin from './pages/Admin.jsx';
 import Library from './pages/Library.jsx';
 import Help from './pages/Help.jsx';
 import Meeting from './pages/Meeting.jsx';
+import { TeamsImport, TeamsConfig } from './pages/Teams.jsx';
 
 // Top-bar menu for Admins: invite a tester by e-mail with a role (Contributor by default).
 function InviteMenu() {
@@ -81,10 +82,11 @@ function AccountMenu({ me }) {
           {item('#/new', '●', 'Record a new process')}
           {item('#/update', '↻', 'Update an existing process')}
           {item('#/library', '☰', 'Process library')}
+          {getConfig().teams && item('#/teams', '▣', 'Document from a Teams meeting')}
           {item('#/help', '?', 'Help and getting started')}
           {me.roles.includes('Admin') && item('#/admin', '⚙', 'Administration')}
-          <hr />
-          <button role="menuitem" onClick={signOut} data-testid="sign-out"><span className="mi">⎋</span>Sign out</button>
+          {!inTeams() && <><hr />
+          <button role="menuitem" onClick={signOut} data-testid="sign-out"><span className="mi">⎋</span>Sign out</button></>}
         </div>
       )}
     </div>
@@ -120,10 +122,11 @@ function parentOf(page, id) {
   if (page === 'library' && id) return '#/library';
   if (page === 'meeting' && id) return `#/review/${id}`;
   if (page === 'update' && id) return '#/update';
+  if (page === 'teams' && id) return '#/teams';
   return '#/';
 }
 
-const PAGE_NAMES = { new: 'Record a new process', update: 'Update a process', record: 'Recording', review: 'Review the draft', library: 'Process library', admin: 'Administration', help: 'Help', meeting: 'Meeting recording' };
+const PAGE_NAMES = { new: 'Record a new process', update: 'Update a process', record: 'Recording', review: 'Review the draft', library: 'Process library', admin: 'Administration', help: 'Help', meeting: 'Meeting recording', teams: 'From a Teams meeting' };
 
 function BackBar({ page, id }) {
   const back = () => { if (visited.length > 1) history.back(); else location.hash = parentOf(page, id); };
@@ -159,6 +162,8 @@ export default function App() {
   else if (page === 'admin') view = <Admin />;
   else if (page === 'help') view = <Help me={me} />;
   else if (page === 'meeting') view = <Meeting draftId={id} />;
+  else if (page === 'teams' && id === 'config') return <TeamsConfig />;
+  else if (page === 'teams') view = <TeamsImport importId={id} />;
   else view = <div className="panel">Page not found.</div>;
 
   const link = (href, label) => <a href={`#${href}`} className={(`/${page || ''}` === href || (href === '/' && !page)) ? 'active' : ''}>{label}</a>;
@@ -169,6 +174,7 @@ export default function App() {
         <nav>
           {link('/', 'Home')}
           {link('/library', 'Process library')}
+          {cfg.teams && link('/teams', 'From Teams')}
           {link('/help', 'Help')}
           {me?.roles.includes('Admin') && link('/admin', 'Administration')}
         </nav>

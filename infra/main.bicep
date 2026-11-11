@@ -73,6 +73,10 @@ param speechLocation string = location
 
 var suffix = uniqueString(resourceGroup().id)
 var speechName = '${namePrefix}-speech-${suffix}'
+
+@description('Microsoft Teams app: a user-assigned managed identity that the API app registration trusts (federated credential), so the app can read Teams transcripts on behalf of the signed-in user without any client secret.')
+param enableTeams bool = true
+var teamsIdentityName = '${namePrefix}-id-${suffix}'
 var speechUser = 'f2dc8367-1007-4938-bd23-fe263f013447' // Cognitive Services Speech User
 var webAppName = '${namePrefix}-app-${suffix}'
 var storageName = take('${namePrefix}st${suffix}', 24)
@@ -169,6 +173,13 @@ var baseSettings = [
 var speechSettings = enableSpeech ? [
   { name: 'AZURE_SPEECH_ENDPOINT', value: 'https://${speechName}.cognitiveservices.azure.com/' }
 ] : []
+resource teamsIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (enableTeams) {
+  name: teamsIdentityName
+  location: location
+}
+var teamsSettings = enableTeams ? [
+  { name: 'TEAMS_MI_CLIENT_ID', value: teamsIdentity!.properties.clientId }
+] : []
 var monitorSettings = paid ? [
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights!.properties.ConnectionString }
 ] : []
@@ -184,7 +195,7 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
   name: webAppName
   location: location
   kind: 'app,linux'
-  identity: { type: 'SystemAssigned' }
+  identity: enableTeams ? { type: 'SystemAssigned, UserAssigned', userAssignedIdentities: { '${teamsIdentity!.id}': {} } } : { type: 'SystemAssigned' }
   properties: {
     serverFarmId: plan.id
     httpsOnly: true
@@ -199,7 +210,7 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
-      appSettings: concat(baseSettings, monitorSettings, aiSettings, speechSettings)
+      appSettings: concat(baseSettings, monitorSettings, aiSettings, speechSettings, teamsSettings)
       azureStorageAccounts: paid ? {
         pdadata: {
           type: 'AzureFiles'
@@ -273,6 +284,8 @@ output managedIdentityPrincipalId string = web.identity.principalId
 output keyVaultName string = paid ? vault!.name : ''
 output storageAccountName string = paid ? storage!.name : ''
 output costProfile string = costProfile
+output teamsIdentityName string = enableTeams ? teamsIdentityName : ''
+output teamsIdentityPrincipalId string = enableTeams ? teamsIdentity!.properties.principalId : ''
 
 // Budget alert (budgets themselves are free). Alerts on actual spend, so any charge e-mails you.
 resource budget 'Microsoft.Consumption/budgets@2023-11-01' = if (!empty(budgetAlertEmail)) {
