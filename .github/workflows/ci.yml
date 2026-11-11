@@ -22,7 +22,8 @@ jobs:
       - name: End-to-end (real Chromium + extension)
         run: |
           npm i --no-save playwright@1
-          npx playwright install --with-deps chromium
+          # The runner image already has most browser libraries; if the Ubuntu mirrors are unreachable, install the browser alone.
+          npx playwright install --with-deps chromium || npx playwright install chromium
           npm run test:e2e
       - name: Package the app (production dependencies only)
         run: |
