@@ -59,3 +59,7 @@ Guests need no licence. Guest invitations must be allowed in the External collab
 - **Teams sign-in.** The Teams clients are pre-authorised for the API's `access_as_user` scope; the API accepts its token audience `api://<host>/<client id>` in addition to the existing ones. The app can be framed only by Teams and Microsoft 365 hosts (`frame-ancestors`), and by nothing at all when the Teams app is not set up.
 - **What is stored.** The parsed transcript is stored with the import (spoken passwords, tokens and e-mail addresses masked) so drafts can be made from it; the importer can delete it. Every import and draft is in the audit log.
 - **Tenant controls still apply.** If Graph access to transcripts is switched off for apps (`GraphAccessToTranscriptsDisabled`), imports fail with a clear message. `-Remove` undoes the setup.
+
+## AI per category
+
+Administration → AI per category switches the AI off for chosen categories (for example critical infrastructure). For a process in such a category nothing is sent to the AI: no screenshots (also no AI check for personal data, so reviewers check them), recorded actions, step texts, meeting transcripts or published content. The rule-based engine drafts it; click-marker suggestions, meeting suggestions, translation and script or flow drafts are refused with `AI_OFF`, and documents in these categories are left out of the library list a Teams meeting analysis sees. Changes are recorded in the audit log (`admin.ai_policy_changed`).

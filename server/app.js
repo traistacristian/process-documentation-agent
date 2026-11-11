@@ -115,6 +115,7 @@ export function createApp(cfg, deps = {}) {
       meetings: meetingsAvailable(),
       teams: teamsAvailable(),
       categories: cfg.categories,
+      aiOffCategories: cfg.aiPolicy?.offCategories || [],
     });
   });
 
@@ -191,11 +192,17 @@ export function createApp(cfg, deps = {}) {
   const teamsPlan = deps.planFromTranscript || planFromTranscript;
   const teamsAvailable = () => !!teamsGraph && (!!deps.planFromTranscript || aiAvailable(cfg));
   const meetingsAvailable = () => (!!deps.transcribeAudio || speechConfigured(cfg)) && (!!deps.findMeetingSuggestions || aiAvailable(cfg));
+  // AI per category: an admin can switch the AI off for sensitive categories. Nothing about a
+  // process in such a category (screenshots, events, text, transcripts) is then sent to the AI; the
+  // rule-based engine drafts it instead.
+  const aiOffFor = (category) => { const c = String(category || '').trim().toLowerCase(); return !!c && (cfg.aiPolicy?.offCategories || []).some((x) => String(x).trim().toLowerCase() === c); };
+  const aiOffMessage = (category) => `The AI is switched off for the category "${category}" (Administration → AI per category).`;
+  const sessionCategory = (sessionId) => store.get('sessions', sessionId)?.meta?.category || '';
   const scriptCache = new Map(); // processId@version -> script (each draft costs an AI call)
   const privacyJobs = new Map();
   const blurEnabled = () => cfg.capture.blurPersonalData !== false && aiAvailable(cfg);
   function protectShot(sessionId, shotId) {
-    if (!blurEnabled()) return;
+    if (!blurEnabled() || aiOffFor(sessionCategory(sessionId))) return;
     const key = `${sessionId}:${shotId}`;
     const job = Promise.resolve()
       .then(() => protectFn({ cfg, path: store.screenshotPath(sessionId, shotId) }))
@@ -250,6 +257,7 @@ export function createApp(cfg, deps = {}) {
     if (!aiAvailable(cfg)) throw httpError(409, `The ${a.what} is drafted by the AI, which is not configured.`);
     const p = await repo.get(req.params.pid);
     if (!p) throw httpError(404, 'Process not found');
+    if (aiOffFor(p.doc.info.category)) throw httpError(409, aiOffMessage(p.doc.info.category), 'AI_OFF');
     const key = `${kind}:${p.doc.info.processId}@${p.doc.info.version}`;
     if (!req.body?.regenerate && scriptCache.has(key)) return res.json(scriptCache.get(key));
     const out = await a.make(normalizeDoc(p.doc)).catch((e) => { throw httpError(502, `The ${a.what} could not be drafted: ${e.message}`); });
@@ -334,7 +342,7 @@ export function createApp(cfg, deps = {}) {
     const { doc } = generateWithRules({ meta: s.meta, events: store.readEvents(s.id), screenshotsAvailable: shots, base: null, user: req.user });
     const ai = s.aiDescriptions || {};
     const live = s.status === 'recording' || s.status === 'paused';
-    const describe = aiDescribeEnabled(cfg) && s.status !== 'generated';
+    const describe = aiDescribeEnabled(cfg) && s.status !== 'generated' && !aiOffFor(s.meta.category);
     const out = doc.steps.map((st, i) => {
       const firstSeq = st.evidenceEventSeqs[0] ?? null;
       const description = findDescription(st, s.stepDescriptions);
@@ -432,7 +440,7 @@ export function createApp(cfg, deps = {}) {
     const input = { cfg, meta: s.meta, events, screenshots: shots, screenshotsAvailable: new Set(shots.map((x) => x.id)), base: s.baseRef?.doc || null, user };
     let result;
     try {
-      const useAi = requested !== 'rules' && aiAvailable(cfg);
+      const useAi = requested !== 'rules' && aiAvailable(cfg) && !aiOffFor(s.meta.category);
       try {
         result = useAi ? await generators.claude(input) : generators.rules(input);
       } catch (e) {
@@ -474,7 +482,7 @@ export function createApp(cfg, deps = {}) {
   // in total; whatever is not ready by then is simply left without markers.
   const locate = deps.locateMarks || locateMarks;
   async function locateMissingMarks(doc, sessionId, user) {
-    if (!aiAvailable(cfg) || cfg.ai.locateMarks === false) return;
+    if (!aiAvailable(cfg) || cfg.ai.locateMarks === false || aiOffFor(doc.info.category)) return;
     const todo = doc.steps.filter((st) => !st.marks?.length && st.screenshotIds.length && st.instructions.length).slice(0, 25);
     if (!todo.length) return;
     const deadline = Date.now() + 45_000;
@@ -539,6 +547,7 @@ export function createApp(cfg, deps = {}) {
   app.post('/api/drafts/:id/locate-marks', wrap(async (req, res) => {
     const d = loadDraft(req);
     if (!aiAvailable(cfg)) throw httpError(400, 'Suggesting markers needs the AI engine. Add them by clicking on the screenshot instead.');
+    if (aiOffFor(d.doc?.info.category)) throw httpError(409, `${aiOffMessage(d.doc.info.category)} Add the markers by clicking on the screenshot.`, 'AI_OFF');
     const shotId = String(req.body?.shotId || '');
     const instructions = (Array.isArray(req.body?.instructions) ? req.body.instructions : []).map((x) => String(x).slice(0, 500)).slice(0, 15);
     await shotReady(d.sessionId, shotId);
@@ -620,6 +629,7 @@ export function createApp(cfg, deps = {}) {
       const now = store.get('drafts', draftId); const meeting = now.meetings.find((x) => x.id === mid);
       await Promise.all(meeting.frames.map((f) => Promise.resolve(shotReady(now.sessionId, f.id)).catch(() => {})));
       const { transcript } = meeting;
+      if (aiOffFor(now.doc.info.category)) throw new Error(aiOffMessage(now.doc.info.category));
       const found = transcript.length ? await meetingAnalyse({ cfg, doc: now.doc, clarifications: now.clarifications, transcript }) : [];
       update((m) => {
         m.suggestions = found.map((x, i) => {
@@ -639,6 +649,7 @@ export function createApp(cfg, deps = {}) {
   app.post('/api/drafts/:id/meetings', wrap(async (req, res) => {
     const d = editableDraft(req);
     if (!meetingsAvailable()) throw httpError(409, 'Meeting recordings need Azure AI Speech and the AI to be configured.', 'NOT_AVAILABLE');
+    if (aiOffFor(d.doc?.info.category)) throw httpError(409, aiOffMessage(d.doc.info.category), 'AI_OFF');
     if (req.body?.consent !== true) throw httpError(400, 'Confirm that everyone in the meeting agreed to the recording');
     d.meetings ||= [];
     if (d.meetings.some((m) => m.status === 'recording')) throw httpError(409, 'A meeting is already being recorded for this draft');
@@ -765,7 +776,7 @@ export function createApp(cfg, deps = {}) {
     const transcript = parseVtt(vtt).map((p) => ({ ...p, text: maskSpokenSecrets(redactText(p.text, { maskEmails: true })) }));
     if (!transcript.length) throw httpError(422, 'The transcript is empty.');
     try { await searchIndex.refresh(); } catch { /* use what is indexed */ }
-    const library = searchIndex.list();
+    const library = searchIndex.list().filter((p) => !aiOffFor(p.category));
     const plan = await teamsPlan({ cfg, transcript, library, subject: b.subject }).catch((e) => { throw httpError(502, `The meeting could not be analysed: ${e.message}`); });
     const x = {
       id: newId('imp'), createdBy: { id: req.user.id, name: req.user.name }, createdAt: Date.now(), meetingId, transcriptId,
@@ -789,6 +800,7 @@ export function createApp(cfg, deps = {}) {
     if (it.action === 'update') {
       const p = await repo.get(it.processId);
       if (!p) throw httpError(404, 'The document is no longer in the library');
+      if (aiOffFor(p.doc.info.category)) throw httpError(409, aiOffMessage(p.doc.info.category), 'AI_OFF');
       const meta = { title: p.doc.info.title, description: '', department: p.doc.info.department, owner: p.doc.info.owner, category: p.doc.info.category, language: p.doc.info.language || 'en' };
       const s = { id: newId('ses'), mode: 'update', meta, baseRef: { processId: p.doc.info.processId, version: p.doc.info.version, etag: p.etag, doc: p.doc }, status: 'generated', eventCount: 0, ...base };
       store.put('sessions', s);
@@ -886,7 +898,7 @@ export function createApp(cfg, deps = {}) {
     doc.steps.forEach((s) => { s.screenshotIds = s.screenshotIds.filter((id) => resolve(id)); });
     // Other languages: translated by Claude; a failed translation never blocks publishing.
     const translations = []; const translationErrors = [];
-    if (aiAvailable(cfg)) {
+    if (aiAvailable(cfg) && !aiOffFor(doc.info.category)) {
       for (const language of otherLanguages(cfg, doc.info.language || 'en')) {
         try {
           const t = await translate({ cfg, doc, to: language });
@@ -995,13 +1007,16 @@ export function createApp(cfg, deps = {}) {
     res.json({ added });
   }));
 
-  app.get('/api/admin/settings', requireRole(ROLES.ADMIN), (req, res) => res.json({ categories: cfg.categories, capture: cfg.capture, retention: cfg.retention, notifications: cfg.notifications, repository: { mode: cfg.repository.mode, label: repo.label }, ai: { engine: engineName() }, auth: { mode: cfg.auth.mode, requireSeparateApprover: cfg.auth.requireSeparateApprover } }));
+  app.get('/api/admin/settings', requireRole(ROLES.ADMIN), (req, res) => res.json({ categories: cfg.categories, aiPolicy: { offCategories: cfg.aiPolicy?.offCategories || [] }, capture: cfg.capture, retention: cfg.retention, notifications: cfg.notifications, repository: { mode: cfg.repository.mode, label: repo.label }, ai: { engine: engineName() }, auth: { mode: cfg.auth.mode, requireSeparateApprover: cfg.auth.requireSeparateApprover } }));
   app.put('/api/admin/settings', requireRole(ROLES.ADMIN), wrap(async (req, res) => {
     const b = req.body || {};
     if (b.categories && (!Array.isArray(b.categories) || b.categories.some((c) => typeof c !== 'string' || !c.trim()))) throw httpError(400, 'Categories must be a list of names');
     if (b.invitations?.groups && Object.values(b.invitations.groups).some((v) => v && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v).trim()))) throw httpError(400, 'Group ids must be Entra object ids (GUIDs)');
+    if (b.aiPolicy && (!Array.isArray(b.aiPolicy.offCategories) || b.aiPolicy.offCategories.some((c) => typeof c !== 'string'))) throw httpError(400, 'aiPolicy.offCategories must be a list of category names');
+    const aiPolicy = b.aiPolicy ? { offCategories: [...new Set(b.aiPolicy.offCategories.map((c) => c.trim()).filter(Boolean))] } : undefined;
     const invitations = b.invitations?.groups ? { groups: Object.fromEntries(Object.entries(b.invitations.groups).filter(([k]) => Object.values(ROLES).includes(k)).map(([k, v]) => [k, String(v || '').trim()])) } : undefined;
-    saveAdminSettings(cfg, { categories: b.categories?.map((c) => c.trim()), capture: b.capture, retention: b.retention, notifications: b.notifications, invitations });
+    saveAdminSettings(cfg, { categories: b.categories?.map((c) => c.trim()), capture: b.capture, retention: b.retention, notifications: b.notifications, invitations, aiPolicy });
+    if (aiPolicy) audit.write(req.user, 'admin.ai_policy_changed', { offCategories: aiPolicy.offCategories });
     audit.write(req.user, 'admin.settings_changed', { keys: Object.keys(b) });
     res.json({ ok: true });
   }));

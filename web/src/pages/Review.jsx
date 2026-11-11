@@ -44,6 +44,7 @@ export default function Review({ id, me }) {
   const reject = () => call(() => api(`/api/drafts/${id}/reject`, { method: 'POST', body: { reason } }), 'The draft was rejected and returned to the author.').then(() => setRejectOpen(false));
   const publish = () => call(() => api(`/api/drafts/${id}/publish`, { method: 'POST', body: { name: pubName ?? (d.approvedDoc?.info.title || '') } }));
 
+  const aiOff = !!doc?.info.category && (cfg.aiOffCategories || []).includes(doc.info.category);
   return (
     <>
       <div className="panel">
@@ -51,9 +52,9 @@ export default function Review({ id, me }) {
           <div>
             <h1 style={{ marginBottom: 4 }}>{doc.info.title}</h1>
             <div className="row small muted"><StatusBadge s={d.status} /><span>{d.mode === 'update' ? `Update of ${d.baseRef.processId} (current v${d.baseRef.version})` : `New process ${doc.info.processId}`}</span>
-              <span>· recorded by {d.createdBy.name}</span><span>· {d.engine === 'rules' ? 'drafted automatically from the recording' : 'drafted by AI from the recording'}</span></div>
+              <span>· recorded by {d.createdBy.name}</span><span>· {d.engine === 'rules' ? 'drafted automatically from the recording' : 'drafted by AI from the recording'}</span>{aiOff && <span className="badge rejected" data-testid="ai-off-badge" title="An administrator switched the AI off for this category">🔒 AI off · {doc.info.category}</span>}</div>
           </div>
-          <div className="row">{editable && cfg.meetings && <a className="btn" href={`#/meeting/${id}`} data-testid="fill-from-meeting" title="Record a meeting in which the process is explained; the agent suggests what to add">🎙 Fill gaps from a meeting</a>}
+          <div className="row">{editable && cfg.meetings && !aiOff && <a className="btn" href={`#/meeting/${id}`} data-testid="fill-from-meeting" title="Record a meeting in which the process is explained; the agent suggests what to add">🎙 Fill gaps from a meeting</a>}
           <button className="btn" onClick={() => download(`/api/drafts/${id}/preview.docx`, `${doc.info.processId}.docx`).catch((e) => setErr(e.message))}>⬇ Word preview</button></div>
         </div>
         {editable && (() => {
@@ -86,7 +87,7 @@ export default function Review({ id, me }) {
       </div>
 
       {tab === 'changes' && d.comparison && <div className="panel"><DiffView baseDoc={d.baseDoc} doc={d.doc} comparison={d.comparison} decisions={d.decisions} onDecide={decide} onDecideAll={decideAll} readOnly={!editable || busy} /></div>}
-      {tab === 'doc' && <DocEditor doc={doc} onChange={(x) => { setDoc(x); setDirty(true); }} shotUrl={shotUrl} readOnly={!editable} suggestMarks={getConfig()?.aiEngine !== 'rules' ? (shotId, instructions) => api(`/api/drafts/${id}/locate-marks`, { method: 'POST', body: { shotId, instructions } }) : null} />}
+      {tab === 'doc' && <DocEditor doc={doc} onChange={(x) => { setDoc(x); setDirty(true); }} shotUrl={shotUrl} readOnly={!editable} suggestMarks={getConfig()?.aiEngine !== 'rules' && !aiOff ? (shotId, instructions) => api(`/api/drafts/${id}/locate-marks`, { method: 'POST', body: { shotId, instructions } }) : null} />}
       {tab === 'clar' && (
         <div className="panel">
           <h2>Missing information</h2>

@@ -56,6 +56,33 @@ function Testers() {
   );
 }
 
+// AI per category: sensitive categories (for example critical infrastructure) never reach the AI.
+function AiPolicy({ categories, off: initial }) {
+  const [off, setOff] = useState(new Set(initial)); const [msg, setMsg] = useState(null); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
+  const toggle = (c) => { const n = new Set(off); if (n.has(c)) n.delete(c); else n.add(c); setOff(n); setMsg(null); };
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try { await api('/api/admin/settings', { method: 'PUT', body: { aiPolicy: { offCategories: [...off] } } }); await refreshConfig(); setMsg(off.size ? `Saved. The AI is off for ${off.size} categor${off.size === 1 ? 'y' : 'ies'}.` : 'Saved. The AI may be used for all categories.'); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="panel" data-testid="ai-policy">
+      <h2>AI per category</h2>
+      <p className="small muted">For sensitive processes (for example critical infrastructure), switch the AI off. Nothing from a process in such a category is sent to the AI: no screenshots, recorded actions, text or meeting transcripts. The rule-based engine drafts it instead, and AI features (step texts, click markers, meeting suggestions, translation, scripts) are not offered.</p>
+      <div className="ai-cats">
+        {categories.map((c) => (
+          <label key={c} className="row between ai-cat">
+            <span>{c}</span>
+            <span className="row" style={{ gap: 6 }}><input type="checkbox" checked={!off.has(c)} onChange={() => toggle(c)} data-testid={`ai-allowed-${c}`} />{off.has(c) ? <span className="badge rejected">AI off</span> : <span className="badge published">AI allowed</span>}</span>
+          </label>
+        ))}
+      </div>
+      {off.size > 0 && <p className="small muted">Personal data in screenshots of these categories is not blurred automatically (that check also uses the AI); the browser add-in still hides e-mail addresses and phone numbers. Reviewers check the screenshots before approval.</p>}
+      <button className="btn primary" onClick={save} disabled={busy} data-testid="ai-policy-save">Save</button>
+      {msg && <div className="alert ok small" style={{ marginTop: 8 }}>{msg}</div>}{err && <div className="alert err small" style={{ marginTop: 8 }}>{err}</div>}
+    </div>
+  );
+}
+
 // The Teams app: one package to upload, plus the one-time Entra setup.
 function TeamsSetup() {
   const [err, setErr] = useState(null); const on = getConfig().teams; const entra = getConfig().authMode === 'entra';
@@ -120,6 +147,7 @@ export default function Admin() {
           <p className="small muted">For presentations and first tests: publishes four realistic sample work instructions, so the home page and the library are not empty. They are marked with the category "Sample".</p>
           <button className="btn" onClick={samples} data-testid="add-samples">Add sample processes</button>
         </div>
+        <AiPolicy categories={s.categories} off={s.aiPolicy?.offCategories || []} />
         <TeamsSetup />
         <div className="panel">
           <h2>Process categories</h2>

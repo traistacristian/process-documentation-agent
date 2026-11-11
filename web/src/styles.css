@@ -247,3 +247,9 @@ html.teams-panel .panel { padding: 14px; }
 html.teams-panel .row { flex-wrap: wrap; }
 html.teams-panel .topbar .logo > span:not(.mark), html.teams-panel .devswitch, html.teams-panel .invite { display: none; }
 html.teams-panel .topbar { justify-content: space-between; }
+
+/* AI per category */
+.ai-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 14px; margin: 8px 0 12px; }
+.ai-cat { flex-wrap: nowrap; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line, #e3e7e6); border-radius: 8px; cursor: pointer; }
+.ai-off-note { display: block; margin-top: 6px; color: #8a4b00; background: #fff6e6; border: 1px solid #f3d9a8; border-radius: 6px; padding: 6px 8px; }
+.ai-cat > span:last-child { flex-wrap: nowrap; flex: none; }

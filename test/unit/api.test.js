@@ -10,6 +10,7 @@ import { loadConfig } from '../../server/config.js';
 import { createApp } from '../../server/app.js';
 import { applyRetention } from '../../server/retention.js';
 import { v1Events } from './helpers.js';
+import { generateWithRules } from '../../server/engine/generate-rules.js';
 
 let srv; let base; let dir; let app; let cfg;
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -404,4 +405,62 @@ test('Teams: a meeting transcript is analysed and turned into an update draft an
     assert.equal((await c('GET', '/api/admin/teams/package', null, 'alex')).status, 403);
     assert.equal((await c('DELETE', `/api/teams/imports/${x.id}`)).status, 200);
   } finally { s4.close(); fs.rmSync(d4, { recursive: true, force: true }); }
+});
+
+test('AI per category: nothing from a switched-off category reaches the AI', async () => {
+  const d5 = fs.mkdtempSync(path.join(os.tmpdir(), 'pda-aipol-'));
+  const c5 = loadConfig({ dataDir: d5, ai: { provider: 'anthropic' } }); c5.repository.local.path = path.join(d5, 'repository');
+  const used = { generate: 0, blur: 0, locate: 0, meeting: 0, plan: null };
+  const a5 = createApp(c5, {
+    generateWithClaude: async (input) => { used.generate++; const r = generateWithRules(input); return { ...r, engine: 'claude:test' }; },
+    protectScreenshot: async () => { used.blur++; return { count: 0, kinds: [] }; },
+    locateMarks: async () => { used.locate++; return []; },
+    describeStepWithClaude: async () => 'x',
+    translateDoc: async ({ doc }) => doc,
+    transcribeAudio: async () => [],
+    findMeetingSuggestions: async () => { used.meeting++; return []; },
+    teamsGraph: { findMeeting: async () => ({ id: 'm', subject: 's' }), transcripts: async () => [{ id: 't' }], content: async () => 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v A>We reset the firewall rule.\n' },
+    planFromTranscript: async ({ library }) => { used.plan = library; return { summary: '', items: [] }; },
+  });
+  const s5 = http.createServer(a5); await new Promise((r) => s5.listen(0, '127.0.0.1', r));
+  const b5 = `http://127.0.0.1:${s5.address().port}`;
+  const c = async (method, p, body, user = 'admin') => { const r = await fetch(b5 + p, { method, headers: { 'content-type': 'application/json', 'x-dev-user': user }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: r.headers.get('content-type')?.includes('json') ? await r.json() : null }; };
+  const record = async (category) => {
+    const s = (await c('POST', '/api/sessions', { mode: 'new', title: `Change ${category}`, category, consent: true })).body;
+    const pair = (await c('POST', '/api/capture/pair', { code: s.pairing.code, client: { type: 'browser-extension' } }, null)).body;
+    const h = { authorization: `Bearer ${pair.captureToken}`, 'x-session-id': s.id, 'content-type': 'application/json' };
+    const shot = await (await fetch(`${b5}/api/capture/screenshots`, { method: 'POST', headers: h, body: JSON.stringify({ data: PNG }) })).json();
+    await fetch(`${b5}/api/capture/events`, { method: 'POST', headers: h, body: JSON.stringify({ events: v1Events().filter((e) => e.type !== 'start').map((e) => ({ ...e, seq: undefined, screenshotId: e.screenshotId ? shot.id : undefined, clientId: `c${e.seq}` })) }) });
+    await c('POST', `/api/sessions/${s.id}/control`, { action: 'stop' });
+    const g = (await c('POST', `/api/sessions/${s.id}/generate`, {})).body;
+    let d; for (let i = 0; i < 80; i++) { d = (await c('GET', `/api/drafts/${g.id}`)).body; if (d.status !== 'generating') break; await new Promise((r) => setTimeout(r, 50)); }
+    return d;
+  };
+  try {
+    assert.equal((await c('PUT', '/api/admin/settings', { aiPolicy: { offCategories: 'Security' } })).status, 400);
+    assert.equal((await c('PUT', '/api/admin/settings', { aiPolicy: { offCategories: ['Security', ' Security '] } })).status, 200);
+    assert.deepEqual((await c('GET', '/api/admin/settings')).body.aiPolicy.offCategories, ['Security']);
+    assert.deepEqual((await c('GET', '/api/config')).body.aiOffCategories, ['Security']);
+    assert.equal((await c('PUT', '/api/admin/settings', { aiPolicy: { offCategories: ['Security'] } }, 'alex')).status, 403);
+
+    const off = await record('Security');
+    assert.equal(off.status, 'draft', off.error);
+    assert.equal(off.engine, 'rules'); assert.equal(used.generate, 0); assert.equal(used.blur, 0); assert.equal(used.locate, 0);
+    const st = off.doc.steps.find((x) => x.screenshotIds.length);
+    assert.equal((await c('POST', `/api/drafts/${off.id}/locate-marks`, { shotId: st.screenshotIds[0], instructions: ['Click'] })).body.code, 'AI_OFF');
+    assert.equal((await c('POST', `/api/drafts/${off.id}/meetings`, { consent: true })).body.code, 'AI_OFF');
+
+    const on = await record('Identity & access');
+    assert.equal(on.engine, 'claude:test'); assert.equal(used.generate, 1); assert.ok(used.blur >= 1);
+
+    // Published documents of a switched-off category: a Teams meeting neither sends them to the AI nor updates them with it.
+    await c('POST', '/api/admin/samples', {});
+    await c('PUT', '/api/admin/settings', { aiPolicy: { offCategories: ['Security', 'Sample'] } });
+    const sample = (await c('GET', '/api/processes')).body.find((p) => p.category === 'Sample');
+    const imp = (await c('POST', '/api/teams/imports', { meetingId: 'm', transcriptId: 't' })).body;
+    assert.ok(used.plan.every((p) => p.category !== 'Sample'), 'switched-off documents are not sent to the AI');
+    assert.equal((await c('POST', `/api/processes/${sample.processId}/script`, {})).body.code, 'AI_OFF');
+    assert.ok(imp.id);
+    assert.equal(used.meeting, 0);
+  } finally { s5.close(); fs.rmSync(d5, { recursive: true, force: true }); }
 });

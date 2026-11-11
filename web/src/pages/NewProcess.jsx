@@ -39,7 +39,8 @@ export default function NewProcess({ me }) {
         <label className="f">IT department or functional area <span className="opt">(optional)</span><input value={f.department} onChange={set('department')} /></label>
         <label className="f">Process owner <span className="opt">(optional)</span><input value={f.owner} onChange={set('owner')} placeholder={me?.name} /></label>
         <label className="f">Category <span className="opt">(optional)</span>
-          <select value={f.category} onChange={set('category')}><option value="">Choose…</option>{cfg.categories.map((c) => <option key={c}>{c}</option>)}</select>
+          <select value={f.category} onChange={set('category')} data-testid="category"><option value="">Choose…</option>{cfg.categories.map((c) => <option key={c} value={c}>{c}{(cfg.aiOffCategories || []).includes(c) ? ' (AI off)' : ''}</option>)}</select>
+          {(cfg.aiOffCategories || []).includes(f.category) && <span className="small ai-off-note" data-testid="ai-off-note">🔒 AI is off for this category. Nothing is sent to the AI; the draft is made by the rule-based engine. Check the screenshots for personal data yourself.</span>}
         </label>
       </div>
       <label className="f" style={{ maxWidth: 320 }}>Document language
