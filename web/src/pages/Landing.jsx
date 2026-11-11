@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { api } from '../api.js';
+import { api, getConfig } from '../api.js';
 import { usePoll, fmtDate, StatusBadge } from '../util.jsx';
 
 export default function Landing({ me }) {
@@ -20,16 +20,17 @@ export default function Landing({ me }) {
       <section className="hero">
         <div>
           <div className="eyebrow">IT process documentation</div>
-          <h1>Do the task once.<br />Get the work instruction for free.</h1>
-          <p>Perform an IT task as you normally would. The agent records each step with screenshots, writes a standard work instruction, and publishes it to SharePoint after review and approval.</p>
+          <h1>Do it once, or just explain it.<br />Get the work instruction for free.</h1>
+          <p>Record an IT task as you normally do, or explain it in a Teams meeting. The agent writes a standard work instruction with numbered screenshots, finds what is still missing, keeps existing documents up to date, and publishes to SharePoint after review and approval.</p>
           <div className="cta">
             <a className="btn big light" href="#/new" data-testid="choice-new">● Record a new process</a>
             <a className="btn big outline" href="#/update" data-testid="choice-update">↻ Update an existing process</a>
+            {getConfig()?.teams && <a className="btn big outline" href="#/teams" data-testid="choice-teams">▣ From a Teams meeting</a>}
           </div>
         </div>
         <div className="hero-steps">
-          <div><b>1</b><span><strong>Record</strong> – do the task in the browser or on the desktop</span></div>
-          <div><b>2</b><span><strong>Review</strong> – the agent drafts the steps, you fill the gaps</span></div>
+          <div><b>1</b><span><strong>Capture</strong> – do the task in the browser or on the desktop, or explain it in a Teams meeting</span></div>
+          <div><b>2</b><span><strong>Review</strong> – the agent drafts the steps, marks every click on the screenshots, and fills gaps from your meetings</span></div>
           <div><b>3</b><span><strong>Approve &amp; publish</strong> – a Word document in SharePoint, in English and German</span></div>
         </div>
       </section>
