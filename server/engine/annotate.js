@@ -60,6 +60,58 @@ export function attachMarks(doc, events) {
   return doc;
 }
 
+// Automatic crop: the part of the screenshot a reader needs for the step, around the elements that are
+// clicked or filled in (and the area the AI named as relevant), with enough margin to show the
+// surrounding labels and headings. Fractions of the image; null when cropping would hardly help.
+export function autoCrop(boxes, { width = 1600, height = 900 } = {}) {
+  const items = (boxes || []).filter((b) => b && [b.x, b.y, b.w, b.h].every(Number.isFinite) && b.w >= 0 && b.h >= 0);
+  if (!items.length) return null;
+  let x0 = Math.min(...items.map((b) => Math.min(b.x, b.cx ?? b.x)));
+  let y0 = Math.min(...items.map((b) => Math.min(b.y, b.cy ?? b.y)));
+  let x1 = Math.max(...items.map((b) => Math.max(b.x + b.w, b.cx ?? 0)));
+  let y1 = Math.max(...items.map((b) => Math.max(b.y + b.h, b.cy ?? 0)));
+  // Margin for context (labels, the panel's heading), then a sensible minimum size.
+  const mx = 0.08 + (x1 - x0) * 0.1; const my = 0.1 + (y1 - y0) * 0.1;
+  // More room above than below: the heading and labels that say where on the page this is sit above.
+  x0 -= mx; x1 += mx; y0 -= my * 1.5; y1 += my * 0.6;
+  const grow = (a0, a1, min, up = 0.5) => { const d = Math.max(0, min - (a1 - a0)); return [a0 - d * up, a1 + d * (1 - up)]; };
+  [x0, x1] = grow(x0, x1, 0.42); [y0, y1] = grow(y0, y1, 0.32, 0.65);
+  // Keep a document-friendly shape (between 4:3 and 2.4:1 in pixels).
+  const ratio = ((x1 - x0) * width) / ((y1 - y0) * height);
+  if (ratio < 4 / 3) [x0, x1] = grow(x0, x1, ((y1 - y0) * height * (4 / 3)) / width);
+  if (ratio > 2.4) [y0, y1] = grow(y0, y1, ((x1 - x0) * width) / 2.4 / height, 0.65);
+  // Slide the window back inside the image.
+  const fit = (a0, a1) => { const len = Math.min(1, a1 - a0); let s0 = Math.max(0, Math.min(a0, 1 - len)); return [s0, s0 + len]; };
+  [x0, x1] = fit(x0, x1); [y0, y1] = fit(y0, y1);
+  const w = x1 - x0; const h = y1 - y0;
+  if (w * h > 0.8) return null; // almost the whole screen anyway
+  const r = (v) => Math.round(v * 10000) / 10000;
+  return { x: r(x0), y: r(y0), w: r(w), h: r(h), auto: true };
+}
+
+// Adds an automatic crop to every step screenshot that has none yet (a reviewer's own crop is kept).
+// focus: optional { [shotId]: box } of areas the AI named as relevant. sizes: { [shotId]: {width,height} }.
+export function applyAutoCrops(doc, { focus = {}, sizes = {}, replace = false } = {}) {
+  let n = 0;
+  for (const st of doc.steps) {
+    st.crops = (st.crops || []).filter((c) => !replace || !c.auto);
+    for (const id of st.screenshotIds || []) {
+      if (st.crops.some((c) => c.shotId === id)) continue;
+      const boxes = [...(st.marks || []).filter((m) => m.shotId === id), ...(focus[id] ? [focus[id]] : [])];
+      const crop = autoCrop(boxes, sizes[id]);
+      if (crop) { st.crops.push({ shotId: id, ...crop }); n++; }
+    }
+  }
+  return n;
+}
+
+// Pixel sizes of screenshots, so automatic crops keep a good shape. { [shotId]: {width,height} }
+export async function imageSizes(entries) {
+  const out = {};
+  for (const [id, p] of entries) { try { const m = await sharp(p).metadata(); out[id] = { width: m.width, height: m.height }; } catch { /* unknown size: default shape */ } }
+  return out;
+}
+
 export const cropFor = (doc, shotId) => (doc?.steps || []).flatMap((s) => ((s.screenshotIds || []).includes(shotId) ? (s.crops || []).filter((c) => c.shotId === shotId) : []))[0] || null;
 export const marksFor = (doc, shotId) => (doc?.steps || []).flatMap((s) => (s.screenshotIds || []).includes(shotId) ? (s.marks || []).filter((m) => m.shotId === shotId) : []);
 

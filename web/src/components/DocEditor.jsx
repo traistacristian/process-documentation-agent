@@ -148,6 +148,7 @@ export default function DocEditor({ doc, onChange, shotUrl, readOnly, suggestMar
             {s.screenshotIds.length > 0 && <div className="shots">{s.screenshotIds.map((id) => (
               <figure key={id}>
                 <MarkedShot src={raw(id)} marks={shotMarks(s, id)} crop={shotCrop(s, id)} alt={`Step ${s.number}`} onClick={readOnly ? undefined : () => setEditing({ i, id })} />
+                {shotCrop(s, id)?.auto && <figcaption className="small muted" data-testid="auto-cropped">✂ Cropped automatically{readOnly ? '' : ' · click to adjust'}</figcaption>}
                 {!readOnly && <div className="shot-actions"><button className="btn sm" onClick={() => setEditing({ i, id })} data-testid="edit-shot">✎ Markers &amp; crop</button><button className="btn sm" title="Remove screenshot" onClick={() => setStep(i, 'screenshotIds', s.screenshotIds.filter((x) => x !== id))}>✕</button></div>}
               </figure>
             ))}</div>}

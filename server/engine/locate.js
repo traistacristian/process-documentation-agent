@@ -13,18 +13,24 @@ const Found = z.object({
     kind: z.enum(['click', 'field']),
     x: z.number(), y: z.number(), width: z.number(), height: z.number(),
   })),
+  // The part of the screenshot a reader of the work instruction needs for this step.
+  focus: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).nullable(),
 });
 
 const SYSTEM = `You mark where a user acts on a screenshot of an IT administration tool, for a work instruction.
 You get the screenshot and the step's numbered instructions. For each instruction that clicks, selects, ticks, or types into something VISIBLE on this screenshot, give the rectangle of that element (the button, link, tab, menu entry, checkbox, list row or input field) in pixels of the image you were given (x and y = top-left corner).
 kind is "field" for an input box or drop-down that is filled in, otherwise "click".
-Leave out instructions whose element is not visible on this screenshot (for example it appears only after a click, or the instruction is about another screen). Never guess: an element you cannot clearly identify is left out. Keep the order of the instructions.`;
+Leave out instructions whose element is not visible on this screenshot (for example it appears only after a click, or the instruction is about another screen). Never guess: an element you cannot clearly identify is left out. Keep the order of the instructions.
+focus: the smallest rectangle a reader needs to follow this step: the elements above, the labels and values next to them, and the heading or title of the panel, dialog or form they are in. Leave out unrelated navigation, empty space and other panels. null when the whole screenshot is needed or nothing on it is relevant.`;
 
 const MAX_W = 1280;
 
-export async function locateMarks({ cfg, buffer, instructions, client }) {
+export async function locateMarks(args) { return (await locateStep(args)).marks; }
+
+// Markers and the relevant area of a step's screenshot, in one call.
+export async function locateStep({ cfg, buffer, instructions, client }) {
   const lines = (instructions || []).map((x) => String(x).trim()).filter(Boolean).slice(0, 15);
-  if (!lines.length) return [];
+  if (!lines.length) return { marks: [], focus: null };
   const meta = await sharp(buffer).metadata();
   const scale = meta.width > MAX_W ? MAX_W / meta.width : 1;
   const w = Math.round(meta.width * scale); const h = Math.round(meta.height * scale);
@@ -43,10 +49,10 @@ export async function locateMarks({ cfg, buffer, instructions, client }) {
     ] }],
   });
   if (msg.stop_reason === 'refusal') throw Object.assign(new Error('The AI model declined to look at this screenshot.'), { code: 'AI_REFUSAL' });
-  const { elements } = format.parse(msg.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+  const { elements, focus: f } = format.parse(msg.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
   const c = (v) => Math.min(1, Math.max(0, v));
   const r4 = (v) => Math.round(v * 10000) / 10000;
-  return elements
+  const marks = elements
     .filter((e) => e.width > 0 && e.height > 0 && e.instruction >= 1 && e.instruction <= lines.length)
     .sort((a, b) => a.instruction - b.instruction)
     .map((e) => {
@@ -56,4 +62,10 @@ export async function locateMarks({ cfg, buffer, instructions, client }) {
     .filter((m) => m.w > 0 && m.h > 0 && m.w < 0.9 && m.h < 0.9) // a box around (almost) everything points at nothing
     .slice(0, 20)
     .map((m, i) => ({ n: i + 1, ...m }));
+  let focus = null;
+  if (f && f.width > 0 && f.height > 0) {
+    const x = c(f.x / w); const y = c(f.y / h); const x2 = c((f.x + f.width) / w); const y2 = c((f.y + f.height) / h);
+    if (x2 - x > 0.05 && y2 - y > 0.05) focus = { x: r4(x), y: r4(y), w: r4(x2 - x), h: r4(y2 - y) };
+  }
+  return { marks, focus };
 }

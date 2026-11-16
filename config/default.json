@@ -48,6 +48,7 @@
   "capture": {
     "captureFreeTextValues": false,
     "blurPersonalData": true,
+    "autoCrop": true,
     "screenshotOnClick": true,
     "maxScreenshotsPerSession": 300,
     "excludedApps": ["keepass", "1password", "bitwarden", "lastpass", "credential manager", "outlook", "teams"],

@@ -74,9 +74,34 @@ test('AI marker placement: pixels become ordered fractions, unknown and oversize
     { instruction: 1, kind: 'field', x: 128, y: 72, width: 256, height: 36 },
     { instruction: 9, kind: 'click', x: 1, y: 1, width: 5, height: 5 },
     { instruction: 1, kind: 'click', x: 0, y: 0, width: 1280, height: 720 },
-  ] }) }] }; } } };
+  ], focus: { x: 64, y: 36, width: 640, height: 360 } }) }] }; } } };
   const marks = await locateMarks({ cfg: loadConfig(), buffer: img, instructions: ['Enter the name in "Display name".', 'Click "Save".'], client });
   assert.match(req.messages[0].content[1].text, /1280 x 720 pixels[\s\S]*2\. Click "Save"/);
   assert.deepEqual(marks.map((m) => [m.n, m.kind, m.x, m.y]), [[1, 'field', 0.1, 0.1], [2, 'click', 0.5, 0.5]]);
   assert.deepEqual(await locateMarks({ cfg: loadConfig(), buffer: img, instructions: [], client }), []);
+  const { locateStep } = await import('../../server/engine/locate.js');
+  const r = await locateStep({ cfg: loadConfig(), buffer: img, instructions: ['Click "Save".'], client });
+  assert.deepEqual(r.focus, { x: 0.05, y: 0.05, w: 0.5, h: 0.5 });
+});
+
+test('automatic crop: around the markers with context, a document-friendly shape, never cutting a marker off', async () => {
+  const { autoCrop, applyAutoCrops } = await import('../../server/engine/annotate.js');
+  const marks = [{ x: 0.7, y: 0.6, w: 0.08, h: 0.04, cx: 0.74, cy: 0.62 }, { x: 0.82, y: 0.85, w: 0.06, h: 0.04, cx: 0.85, cy: 0.87 }];
+  const c = autoCrop(marks, { width: 1600, height: 900 });
+  assert.ok(c.auto);
+  for (const m of marks) { assert.ok(m.x >= c.x && m.x + m.w <= c.x + c.w + 1e-9, 'x inside'); assert.ok(m.y >= c.y && m.y + m.h <= c.y + c.h + 1e-9, 'y inside'); }
+  assert.ok(c.x >= 0 && c.y >= 0 && c.x + c.w <= 1.0001 && c.y + c.h <= 1.0001, 'inside the image');
+  assert.ok(c.w * c.h < 0.8 && c.w >= 0.42 && c.h >= 0.32);
+  const ratio = (c.w * 1600) / (c.h * 900); assert.ok(ratio >= 4 / 3 - 0.01 && ratio <= 2.41, `shape ${ratio}`);
+  assert.equal(autoCrop([]), null);
+  assert.equal(autoCrop([{ x: 0.02, y: 0.02, w: 0.01, h: 0.01 }, { x: 0.95, y: 0.95, w: 0.02, h: 0.02 }]), null, 'markers all over the screen: no crop');
+  const doc = { steps: [
+    { screenshotIds: ['a', 'b'], marks: [{ shotId: 'a', ...marks[0] }], crops: [] },
+    { screenshotIds: ['c'], marks: [{ shotId: 'c', ...marks[0] }], crops: [{ shotId: 'c', x: 0, y: 0, w: 0.5, h: 0.5 }] },
+    { screenshotIds: ['d'], marks: [], crops: [] },
+  ] };
+  assert.equal(applyAutoCrops(doc, { focus: { d: { x: 0.1, y: 0.1, w: 0.3, h: 0.2 } } }), 2);
+  assert.equal(doc.steps[0].crops.length, 1, 'no markers on b: not cropped');
+  assert.deepEqual(doc.steps[1].crops, [{ shotId: 'c', x: 0, y: 0, w: 0.5, h: 0.5 }], "the reviewer's own crop is kept");
+  assert.equal(doc.steps[2].crops[0].shotId, 'd', 'the AI area is used without markers');
 });

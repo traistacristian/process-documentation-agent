@@ -24,7 +24,7 @@ export const StepSchema = z.object({
   // Numbered click markers on the step's screenshots (positions as fractions of the image).
   marks: z.array(z.object({ shotId: str, n: z.number().int(), kind: z.enum(['click', 'field']), x: z.number(), y: z.number(), w: z.number(), h: z.number(), cx: z.number(), cy: z.number() })),
   // Part of a screenshot to show (fractions of the image); the stored screenshot stays complete.
-  crops: z.array(z.object({ shotId: str, x: z.number(), y: z.number(), w: z.number(), h: z.number() })),
+  crops: z.array(z.object({ shotId: str, x: z.number(), y: z.number(), w: z.number(), h: z.number(), auto: z.boolean().optional() })),
 });
 
 export const DocSchema = z.object({

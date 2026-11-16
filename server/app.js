@@ -16,8 +16,8 @@ import { protectScreenshot } from './engine/privacy.js';
 import { attachTargets } from './engine/targets.js';
 import { SearchIndex } from './search.js';
 import { extractKeywords, normalizeKeywords } from './engine/keywords.js';
-import { attachMarks, marksFor, cropFor, renderShot } from './engine/annotate.js';
-import { locateMarks } from './engine/locate.js';
+import { attachMarks, marksFor, cropFor, renderShot, applyAutoCrops, imageSizes } from './engine/annotate.js';
+import { locateMarks, locateStep } from './engine/locate.js';
 import { translateDoc, otherLanguages } from './engine/translate.js';
 import { generateScript } from './engine/script.js';
 import { generateFlow, flowToMarkdown } from './engine/flow.js';
@@ -457,7 +457,8 @@ export function createApp(cfg, deps = {}) {
       doc.info.fileName = s.meta.fileName || s.baseRef?.doc?.info?.fileName || '';
       attachTargets(doc, events);
       attachMarks(doc, events);
-      await locateMissingMarks(doc, s.id, user);
+      const focus = await locateMissingMarks(doc, s.id, user);
+      if (cfg.capture.autoCrop !== false) await autoCropDoc(doc, s.id, focus);
       if (s.mode === 'new') {
         doc.info.processId = `PRC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
         doc.info.version = '0.1'; doc.info.createdAt = new Date().toISOString();
@@ -481,22 +482,36 @@ export function createApp(cfg, deps = {}) {
   // proposes the markers from the screenshot and the instructions. A few at a time, at most 45 seconds
   // in total; whatever is not ready by then is simply left without markers.
   const locate = deps.locateMarks || locateMarks;
-  async function locateMissingMarks(doc, sessionId, user) {
-    if (!aiAvailable(cfg) || cfg.ai.locateMarks === false || aiOffFor(doc.info.category)) return;
+  const locateFull = deps.locateStep || (deps.locateMarks ? async (a) => ({ marks: await deps.locateMarks(a), focus: null }) : locateStep);
+  // Returns the areas the AI named as relevant ({ [shotId]: box }), used for automatic crops.
+  async function locateMissingMarks(doc, sessionId, user, { onlyFocus = false } = {}) {
+    const focus = {};
+    if (!aiAvailable(cfg) || cfg.ai.locateMarks === false || aiOffFor(doc.info.category)) return focus;
     const todo = doc.steps.filter((st) => !st.marks?.length && st.screenshotIds.length && st.instructions.length).slice(0, 25);
-    if (!todo.length) return;
+    if (!todo.length) return focus;
     const deadline = Date.now() + 45_000;
     const run = async (st) => {
       const shotId = st.screenshotIds[0]; const p = store.screenshotPath(sessionId, shotId);
       if (!p || Date.now() > deadline) return;
       try {
         await shotReady(sessionId, shotId);
-        const marks = await locate({ cfg, buffer: fs.readFileSync(p), instructions: st.instructions });
-        if (Date.now() <= deadline + 15_000) st.marks = marks.map((m) => ({ ...m, shotId }));
+        const r = await locateFull({ cfg, buffer: fs.readFileSync(p), instructions: st.instructions });
+        if (Date.now() <= deadline + 15_000) {
+          if (!onlyFocus) st.marks = r.marks.map((m) => ({ ...m, shotId }));
+          if (r.focus) focus[shotId] = r.focus;
+        }
       } catch (e) { audit.write(user, 'step.locate_marks_failed', { sessionId, error: e.message }); }
     };
     const queue = [...todo];
     await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => { while (queue.length) await run(queue.shift()); }));
+    return focus;
+  }
+  // Automatic crops: around the numbered markers (and the AI's relevant area), so the document shows
+  // what matters for the step. The stored screenshot stays complete; the reviewer can widen or remove it.
+  async function autoCropDoc(doc, sessionId, focus = {}, opts = {}) {
+    const ids = [...new Set(doc.steps.flatMap((st) => st.screenshotIds || []))];
+    const sizes = await imageSizes(ids.map((id) => [id, store.screenshotPath(sessionId, id)]).filter(([, p]) => p));
+    return applyAutoCrops(doc, { focus, sizes, ...opts });
   }
 
   // ---------------------------------------------------------------- drafts / review / approval / publishing
@@ -544,6 +559,20 @@ export function createApp(cfg, deps = {}) {
   }));
 
   // Proposes click markers for one screenshot (used by the screenshot editor's "Suggest with AI").
+  // Crops every step screenshot to the relevant part again (reviewer crops are kept unless replace=true).
+  app.post('/api/drafts/:id/auto-crop', wrap(async (req, res) => {
+    const d = editableDraft(req);
+    const replace = req.body?.replace === true;
+    if (replace) for (const st of d.doc.steps) st.crops = [];
+    const focus = await locateMissingMarks(d.doc, d.sessionId, req.user, { onlyFocus: true });
+    const n = await autoCropDoc(d.doc, d.sessionId, focus);
+    d.doc = normalizeDoc(d.doc);
+    if (d.baseDoc) d.comparison = compareDocs(d.baseDoc, d.doc);
+    d.updatedAt = Date.now(); d.history.push({ ts: Date.now(), user: req.user.name, action: `cropped ${n} screenshot(s) automatically` });
+    store.put('drafts', d);
+    audit.write(req.user, 'draft.auto_cropped', { draftId: d.id, cropped: n, replace });
+    res.json({ ...draftView(d), cropped: n });
+  }));
   app.post('/api/drafts/:id/locate-marks', wrap(async (req, res) => {
     const d = loadDraft(req);
     if (!aiAvailable(cfg)) throw httpError(400, 'Suggesting markers needs the AI engine. Add them by clicking on the screenshot instead.');

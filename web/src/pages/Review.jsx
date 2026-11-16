@@ -55,6 +55,7 @@ export default function Review({ id, me }) {
               <span>· recorded by {d.createdBy.name}</span><span>· {d.engine === 'rules' ? 'drafted automatically from the recording' : 'drafted by AI from the recording'}</span>{aiOff && <span className="badge rejected" data-testid="ai-off-badge" title="An administrator switched the AI off for this category">🔒 AI off · {doc.info.category}</span>}</div>
           </div>
           <div className="row">{editable && cfg.meetings && !aiOff && <a className="btn" href={`#/meeting/${id}`} data-testid="fill-from-meeting" title="Record a meeting in which the process is explained; the agent suggests what to add">🎙 Fill gaps from a meeting</a>}
+          {editable && doc.steps.some((st) => st.screenshotIds.length) && <button className="btn" disabled={busy || dirty} title={dirty ? 'Save your edits first' : 'Cut every step screenshot to the part that matters (around the numbered markers). Crops you made yourself are kept.'} onClick={() => call(() => api(`/api/drafts/${id}/auto-crop`, { method: 'POST', body: {} })).then((r) => r && setMsg(r.cropped ? `${r.cropped} screenshot(s) cropped to the relevant part. Click a screenshot to adjust.` : 'Nothing to crop: the screenshots are already cropped, or they have no markers to crop around.'))} data-testid="auto-crop-btn">✂ Crop screenshots</button>}
           <button className="btn" onClick={() => download(`/api/drafts/${id}/preview.docx`, `${doc.info.processId}.docx`).catch((e) => setErr(e.message))}>⬇ Word preview</button></div>
         </div>
         {editable && (() => {

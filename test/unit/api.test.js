@@ -464,3 +464,29 @@ test('AI per category: nothing from a switched-off category reaches the AI', asy
     assert.equal(used.meeting, 0);
   } finally { s5.close(); fs.rmSync(d5, { recursive: true, force: true }); }
 });
+
+test('screenshots are cropped automatically around the clicks; reviewers can re-crop', async () => {
+  const s = (await call('POST', '/api/sessions', { mode: 'new', title: 'Add a user', consent: true }, 'alex')).body;
+  const pair = await call('POST', '/api/capture/pair', { code: s.pairing.code, client: { type: 'browser-extension' } }, null);
+  const h = { authorization: `Bearer ${pair.body.captureToken}`, 'x-session-id': s.id };
+  const shot = (await call('POST', '/api/capture/screenshots', { data: PNG }, null, h)).body;
+  const view = { vw: 1280, vh: 720, sx: 0, sy: 0 }; const url = 'https://admin.microsoft.com/#/users';
+  await call('POST', '/api/capture/events', { events: [
+    { type: 'navigate', url, pageTitle: 'Active users', app: 'Microsoft 365 admin center', clientId: 'a1', ts: Date.now() },
+    { type: 'click', url, pageTitle: 'Active users', app: 'Microsoft 365 admin center', screenshotId: shot.id, element: { role: 'button', name: 'Add a user' }, box: { ...view, x: 900, y: 500, w: 90, h: 30 }, clientId: 'a2', ts: Date.now() + 1000 },
+  ] }, null, h);
+  await call('POST', `/api/sessions/${s.id}/control`, { action: 'stop' }, 'alex');
+  const d = await waitDraft((await call('POST', `/api/sessions/${s.id}/generate`, {}, 'alex')).body.id);
+  const st = d.doc.steps.find((x) => x.screenshotIds.includes(shot.id));
+  assert.ok(st, 'the step has the screenshot');
+  const crop = st.crops.find((c) => c.shotId === shot.id);
+  assert.ok(crop?.auto, 'cropped automatically');
+  const m = st.marks[0];
+  assert.ok(m.x >= crop.x && m.x + m.w <= crop.x + crop.w + 1e-9 && m.y >= crop.y && m.y + m.h <= crop.y + crop.h + 1e-9, 'the marker stays visible');
+  assert.ok(crop.w < 1 && crop.h < 1);
+  const raw = await fetch(`${base}/api/drafts/${d.id}/screenshots/${shot.id}?raw=1`, { headers: { 'x-dev-user': 'alex' } });
+  assert.equal(raw.status, 200);
+  const r = await call('POST', `/api/drafts/${d.id}/auto-crop`, { replace: true }, 'alex');
+  assert.equal(r.status, 200); assert.equal(r.body.cropped, 1);
+  assert.equal((await call('POST', `/api/drafts/${d.id}/auto-crop`, {}, 'sam')).status, 200, 'approvers may crop too');
+});
