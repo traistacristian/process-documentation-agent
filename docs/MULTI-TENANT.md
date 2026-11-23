@@ -17,7 +17,7 @@ The single-organisation deployment (docs/GO-LIVE.md) is unchanged and stays the 
 | Customer's SharePoint site connected from the setup page, app-only access to that one site, no secrets | Done, tested with a mocked Graph; not yet run against real tenants |
 | `scripts/Setup-SaaSPublisher.ps1`: multi-tenant app registrations, federated credential, App Service settings | Written; not yet run |
 | Licence rules: trial end and suspension make the app read-only, seats per month, monthly AI quota | Done, tested |
-| Marketplace SaaS offer (landing page, Fulfillment API, webhook) | PR 4 |
+| Microsoft Marketplace SaaS offer: landing page, SaaS Fulfillment API v2, webhook | Done, tested against a fake Fulfillment API; not yet run against Partner Center |
 | Teams app for customer tenants (store listing) | After Marketplace; the Teams manifest needs the verified publisher domain |
 | Table/Blob Storage instead of files, more than one instance | Later |
 
@@ -65,6 +65,36 @@ Locally (without Microsoft sign-in the app cannot be used, but the server starts
 ```bash
 PDA_MULTI_TENANT=true ENTRA_API_CLIENT_ID=<api app id> ENTRA_SPA_CLIENT_ID=<spa app id> npm start
 ```
+
+## Selling through Microsoft Marketplace
+
+The offer is a transactable SaaS offer in Partner Center (Microsoft commercial marketplace), priced per user per month. Plan ids in Partner Center should match the plan names below (`team`, `business`, …); otherwise map them with `saas.marketplace.planMap`. The quantity bought becomes the tenant's seats.
+
+**Partner Center → the offer → Technical configuration** (the setup script prints these):
+
+| Field | Value |
+|---|---|
+| Landing page URL | `https://<your app>/subscribe` |
+| Connection webhook | `https://<your app>/api/marketplace/webhook` |
+| Microsoft Entra tenant ID | your (publisher) tenant, `PDA_PUBLISHER_TENANT_ID` |
+| Microsoft Entra application ID | the multi-tenant API app (`ENTRA_API_CLIENT_ID`; another app with `PDA_MARKETPLACE_APP_ID`) |
+
+**Purchase.** Marketplace sends the buyer to `/subscribe?token=…`. The buyer signs in with a work account (only the web app, so the organisation does not need to have added Doku yet). The page resolves the purchase with the SaaS Fulfillment API and shows plan, users and organisation. *Activate* registers the customer's tenant (the subscription's beneficiary) as `active` with that plan and seats and activates the subscription. A trial that is bought keeps its data and loses its end date.
+
+- Bought by the organisation's own directory administrator: that person becomes its Admin; then *add the app* (admin consent) and *organisation setup* as above.
+- Bought by a partner for a customer (CSP, an MSP): the partner gets no access to the customer. The customer's first directory administrator who signs in becomes its Admin (*become its administrator* banner).
+
+**Changes** come through the webhook, whose token must be issued by Microsoft Entra in the publisher tenant, for our app, to the Marketplace application. Each event is read back from the Fulfillment API before it is applied:
+
+| Event | Effect |
+|---|---|
+| ChangePlan | plan changes (acknowledged to Marketplace) |
+| ChangeQuantity | seats change (acknowledged) |
+| Suspend | `suspended`: read-only |
+| Reinstate, Renew | `active` (Reinstate acknowledged) |
+| Unsubscribe | `cancelled`: no access; the data folder stays until you delete it |
+
+Calls to the Fulfillment API use a token for the Marketplace resource from the app's federated credential: no secret.
 
 ## Plans and licence rules
 

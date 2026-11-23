@@ -37,6 +37,8 @@ export function loadConfig(overrides = {}) {
   if (env.PDA_MULTI_TENANT) cfg.multiTenant = env.PDA_MULTI_TENANT === 'true';
   if (env.PDA_SELF_SIGNUP) cfg.saas = { ...(cfg.saas || {}), selfSignup: env.PDA_SELF_SIGNUP !== 'false' };
   if (env.PDA_TRIAL_DAYS) cfg.saas = { ...(cfg.saas || {}), trialDays: Number(env.PDA_TRIAL_DAYS) };
+  if (env.PDA_PUBLISHER_TENANT_ID) cfg.saas = { ...(cfg.saas || {}), marketplace: { ...(cfg.saas?.marketplace || {}), publisherTenantId: env.PDA_PUBLISHER_TENANT_ID } };
+  if (env.PDA_MARKETPLACE_APP_ID) cfg.saas = { ...(cfg.saas || {}), marketplace: { ...(cfg.saas?.marketplace || {}), appId: env.PDA_MARKETPLACE_APP_ID } };
   if (env.PDA_MI_CLIENT_ID) cfg.saas = { ...(cfg.saas || {}), miClientId: env.PDA_MI_CLIENT_ID };
   if (env.PDA_REPOSITORY_MODE) cfg.repository.mode = env.PDA_REPOSITORY_MODE;
   if (env.PDA_AI_PROVIDER) cfg.ai.provider = env.PDA_AI_PROVIDER;

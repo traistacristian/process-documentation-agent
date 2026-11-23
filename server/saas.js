@@ -27,6 +27,7 @@ import { TenantRegistry } from './tenants.js';
 import { createFederatedIdentity } from './federated.js';
 import { evaluate, checkRequest, seatError } from './licence.js';
 import { mountSubscription } from './subscription.js';
+import { mountMarketplace, createMarketplaceClient, createWebhookVerifier, landingVerifier } from './marketplace.js';
 import { mountOnboarding, createSharePointConnector, effectiveUser, isDirectoryAdmin } from './onboarding.js';
 
 const httpError = (status, message, code) => Object.assign(new Error(message), { status, code });
@@ -64,6 +65,7 @@ export function createSaaSApp(cfg, deps = {}) {
     const lic = evaluate(cfg, t);
     const { aiUsed } = registry.usage(t.id);
     app.locals.cfg.tenant.licence = { readOnly: lic.readOnly, reason: lic.reason, plan: lic.plan, trialEndsAt: lic.trialEndsAt };
+    app.locals.cfg.tenant.noAdmins = !t.admins?.length;
     app.locals.cfg.ai.quotaExceeded = lic.aiGenerations !== null && aiUsed >= lic.aiGenerations;
     return { app, lic };
   }
@@ -152,6 +154,16 @@ export function createSaaSApp(cfg, deps = {}) {
   // Admin consent, sign-up and setup (before the tenant needs to exist).
   mountOnboarding(app, { cfg, registry, userOf, bearer, connector, tenantConfigFor: (t) => tenantConfig(cfg, t), wrap });
   mountSubscription(app, { cfg, registry, userOf, wrap });
+  // Microsoft Marketplace SaaS offer: landing page and webhook (server/marketplace.js).
+  const mp = cfg.saas?.marketplace || {};
+  const mpAppId = mp.appId || apiClientId;
+  mountMarketplace(app, {
+    cfg, registry, wrap,
+    verifyUser: deps.verifyLandingToken || landingVerifier(spaClientId),
+    client: deps.marketplace || createMarketplaceClient({ publisherTenantId: mp.publisherTenantId, appId: mpAppId, federated }),
+    verifyWebhook: deps.verifyWebhookToken || (mp.publisherTenantId ? createWebhookVerifier({ publisherTenantId: mp.publisherTenantId, appId: mpAppId }) : async () => { throw new Error('Marketplace is not configured'); }),
+    log: deps.platformLog || ((what, details) => console.log(JSON.stringify({ ts: new Date().toISOString(), event: what, ...details }))),
+  });
 
   // Everything else under /api: a signed-in user of an onboarded tenant. (Routes, not app.use, so the
   // tenant's app sees the full path.)

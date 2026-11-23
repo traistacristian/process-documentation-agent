@@ -113,7 +113,15 @@ export function mountOnboarding(app, { cfg, registry, userOf, bearer, connector,
   app.post('/api/onboarding/start', express_json(), wrap(async (req, res) => {
     const user = await signedIn(req);
     const existing = registry.get(user.tenantId);
-    if (existing) return res.status(existing.status === 'cancelled' ? 403 : 200).json(tenantView(existing));
+    if (existing) {
+      // Bought through the Marketplace by someone outside the organisation (e.g. its IT partner):
+      // the organisation's first directory administrator who signs in becomes its Admin.
+      if (existing.status !== 'cancelled' && !existing.admins?.length && isDirectoryAdmin(user)) {
+        const t = registry.upsert(existing.id, { admins: [user.id] });
+        return res.json(tenantView(t));
+      }
+      return res.status(existing.status === 'cancelled' ? 403 : 200).json(tenantView(existing));
+    }
     if (cfg.saas?.selfSignup === false) throw err(403, 'Sign-up is by invitation. Contact us to start a trial.', 'SIGNUP_CLOSED');
     if (!isDirectoryAdmin(user)) throw err(403, 'Only a Microsoft 365 administrator of your organisation can start the trial (Global, Application or Cloud Application Administrator).', 'NOT_DIRECTORY_ADMIN');
     const name = String(req.body?.name || '').trim().slice(0, 120) || user.email?.split('@')[1] || 'My organisation';

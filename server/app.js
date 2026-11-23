@@ -116,7 +116,7 @@ export function createApp(cfg, deps = {}) {
       // A tenant of the multi-tenant deployment signs in through the shared "organizations" endpoint.
       entra: cfg.auth.mode === 'entra' ? { tenantId: cfg.tenant ? 'organizations' : cfg.auth.entra.tenantId, clientId: cfg.auth.entra.spaClientId, scope: cfg.auth.entra.apiScope } : undefined,
       multiTenant: cfg.tenant ? true : undefined,
-      tenant: cfg.tenant ? { id: cfg.tenant.id, name: cfg.tenant.name, status: 'ready', subscription: cfg.tenant.status, trialEndsAt: cfg.tenant.trialEndsAt || null, sharepoint: cfg.repository.mode === 'sharepoint', licence: cfg.tenant.licence || null } : undefined,
+      tenant: cfg.tenant ? { id: cfg.tenant.id, name: cfg.tenant.name, status: 'ready', subscription: cfg.tenant.status, trialEndsAt: cfg.tenant.trialEndsAt || null, sharepoint: cfg.repository.mode === 'sharepoint', licence: cfg.tenant.licence || null, noAdmins: !!cfg.tenant.noAdmins } : undefined,
       repository: { mode: cfg.repository.mode, label: repo.label },
       aiEngine: engineName(),
       meetings: meetingsAvailable(),

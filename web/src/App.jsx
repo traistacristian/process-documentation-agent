@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Setup, { Signup, StartTrial } from './pages/Setup.jsx';
+import Subscribe from './pages/Subscribe.jsx';
 import { api, getConfig, devUser, setDevUser, signOut, isSignedOut, signIn, inTeams, tenantProblem } from './api.js';
 import { usePoll } from './util.jsx';
 import Landing from './pages/Landing.jsx';
@@ -166,7 +167,7 @@ export default function App() {
   const [active, setActive] = useState(null);
   const [, page, id] = route.split('?')[0].split('/');
   // Signed in but the organisation cannot use the app, or the public sign-up page: no API calls.
-  const publicPage = cfg.multiTenant && page === 'signup';
+  const publicPage = cfg.multiTenant && (page === 'signup' || cfg.landing);
   const problem = tenantProblem() || (publicPage ? { status: 'signup' } : null);
   useEffect(() => { if (!problem) api('/api/me').then(setMe).catch(() => setMe(null)); }, []);
   usePoll(async () => {
@@ -175,7 +176,7 @@ export default function App() {
     setActive(list.find((s) => s.status === 'recording' || s.status === 'paused' ) || null);
   }, 4000, [route]);
 
-  if (publicPage) return <Signup />;
+  if (publicPage) return cfg.landing ? <Subscribe /> : <Signup />;
   if (isSignedOut()) return <SignedOut />;
   if (problem) return <TenantProblem tenant={problem} />;
   let view;
@@ -222,6 +223,7 @@ export default function App() {
       <main>
         {cfg.tenant?.licence?.readOnly && <div className="alert err" data-testid="licence-banner">{cfg.tenant.licence.reason === 'trial_ended' ? 'The trial has ended.' : 'The subscription is suspended.'} You can still read, download and delete; recording and publishing are paused until {me?.roles.includes('Admin') ? <a href="#/setup">your organisation subscribes</a> : 'your administrator renews it'}.</div>}
         {cfg.tenant?.licence?.plan === 'trial' && !cfg.tenant.licence.readOnly && cfg.tenant.licence.trialEndsAt && <div className="alert warn small" data-testid="trial-banner">Trial until {new Date(cfg.tenant.licence.trialEndsAt).toLocaleString()} (1 seat).</div>}
+        {cfg.tenant?.noAdmins && me && !me.roles.includes('Admin') && <div className="alert warn" data-testid="claim-admin">Your organisation's subscription has no administrator yet. If you are a Microsoft 365 administrator, <button className="btn sm" onClick={() => api('/api/onboarding/start', { method: 'POST', body: {} }).then(() => location.reload(), (e) => alert(e.message))}>become its administrator</button>.</div>}
         {cfg.multiTenant && me?.roles.includes('Admin') && !cfg.tenant?.sharepoint && page !== 'setup' && <div className="alert warn" data-testid="setup-banner">Published documents are kept in a temporary folder until a SharePoint site is connected. <a href="#/setup">Finish the organisation setup</a>.</div>}
         {page && <BackBar page={page} id={id} />}{view}
       </main>
