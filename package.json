@@ -8,6 +8,7 @@
     "dev:web": "vite --config web/vite.config.js",
     "build": "vite build --config web/vite.config.js",
     "start": "node server/index.js",
+    "tenant": "node server/tenant-admin.js",
     "test": "node --test \"test/unit/**/*.test.js\"",
     "test:e2e": "npm run build && node --test --test-concurrency=1 \"test/e2e/**/*.test.js\""
   },

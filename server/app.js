@@ -39,6 +39,14 @@ const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
 const cleanFileName = (n) => String(n || '').replace(/[\\/:*?"<>|#%\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').replace(/^[.\s]+|[.\s]+$/g, '').slice(0, 120);
 const httpError = (status, message, code) => Object.assign(new Error(message), { status, code });
 
+// Framing: nobody, except Microsoft Teams (and Outlook / Microsoft 365, which host Teams apps) when the Teams app is set up.
+export function securityHeaders(cfg) {
+  const frame = teamsEnabled(cfg)
+    ? { 'content-security-policy': "frame-ancestors 'self' https://teams.microsoft.com https://*.teams.microsoft.com https://teams.cloud.microsoft https://*.cloud.microsoft https://*.office.com https://outlook.office.com https://*.microsoft365.com" }
+    : { 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" };
+  return (req, res, next) => { res.set({ 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', ...frame, ...(req.secure ? { 'strict-transport-security': 'max-age=31536000' } : {}) }); next(); };
+}
+
 export function createApp(cfg, deps = {}) {
   const store = deps.store || new Store(cfg.dataDir);
   const audit = deps.audit || new AuditLog(cfg.dataDir);
@@ -54,11 +62,7 @@ export function createApp(cfg, deps = {}) {
   app.get('/healthz', (req, res) => {
     try { store.ping?.(); res.json({ ok: true }); } catch (e) { res.status(503).json({ ok: false, error: 'storage unavailable' }); }
   });
-  // Framing: nobody, except Microsoft Teams (and Outlook / Microsoft 365, which host Teams apps) when the Teams app is set up.
-  const frame = teamsEnabled(cfg)
-    ? { 'content-security-policy': "frame-ancestors 'self' https://teams.microsoft.com https://*.teams.microsoft.com https://teams.cloud.microsoft https://*.cloud.microsoft https://*.office.com https://outlook.office.com https://*.microsoft365.com" }
-    : { 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" };
-  app.use((req, res, next) => { res.set({ 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', ...frame, ...(req.secure ? { 'strict-transport-security': 'max-age=31536000' } : {}) }); next(); });
+  app.use(securityHeaders(cfg));
 
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
   const notify = async (event, payload) => {
@@ -109,7 +113,10 @@ export function createApp(cfg, deps = {}) {
     res.json({
       authMode: cfg.auth.mode,
       devUsers: cfg.auth.mode === 'dev' ? cfg.auth.devUsers : undefined,
-      entra: cfg.auth.mode === 'entra' ? { tenantId: cfg.auth.entra.tenantId, clientId: cfg.auth.entra.spaClientId, scope: cfg.auth.entra.apiScope } : undefined,
+      // A tenant of the multi-tenant deployment signs in through the shared "organizations" endpoint.
+      entra: cfg.auth.mode === 'entra' ? { tenantId: cfg.tenant ? 'organizations' : cfg.auth.entra.tenantId, clientId: cfg.auth.entra.spaClientId, scope: cfg.auth.entra.apiScope } : undefined,
+      multiTenant: cfg.tenant ? true : undefined,
+      tenant: cfg.tenant ? { id: cfg.tenant.id, name: cfg.tenant.name, status: 'ready' } : undefined,
       repository: { mode: cfg.repository.mode, label: repo.label },
       aiEngine: engineName(),
       meetings: meetingsAvailable(),
@@ -305,13 +312,16 @@ export function createApp(cfg, deps = {}) {
       if (!cleanFileName(title)) throw httpError(400, 'The process name must contain letters or digits');
       meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : ''), language: b.language === 'de' ? 'de' : 'en', fileName: cleanFileName(b.fileName || title) };
     }
+    if (!b.consent) throw httpError(400, 'Explicit consent is required before recording can start');
+    const id = newId('ses'); const expiresAt = Date.now() + 8 * 3600_000;
+    // Multi-tenant: the code must be unique across all tenants, and the front must know its tenant.
+    const code = deps.issuePairingCode ? deps.issuePairingCode(id, expiresAt) : String(crypto.randomInt(100000, 999999));
     const s = {
-      id: newId('ses'), mode, meta, baseRef, status: 'recording', createdBy: { id: req.user.id, name: req.user.name },
+      id, mode, meta, baseRef, status: 'recording', createdBy: { id: req.user.id, name: req.user.name },
       startedAt: Date.now(), stoppedAt: null, pausedMs: 0, pausedAt: null, eventCount: 0, clients: [],
-      pairing: { code: String(crypto.randomInt(100000, 999999)), expiresAt: Date.now() + 8 * 3600_000 },
+      pairing: { code, expiresAt },
       consent: { acceptedAt: b.consent ? Date.now() : null, text: 'Recording captures application names, page titles, the names of clicked elements and screenshots while recording is active. Passwords and sensitive fields are never captured.' },
     };
-    if (!b.consent) throw httpError(400, 'Explicit consent is required before recording can start');
     store.put('sessions', s);
     store.appendEvents(s.id, [{ type: 'start', ts: Date.now(), source: 'user' }]);
     audit.write(req.user, 'session.started', { sessionId: s.id, mode, title: meta.title, processId: baseRef?.processId });
@@ -1070,7 +1080,7 @@ export function createApp(cfg, deps = {}) {
     if (status >= 500) console.error(err);
     res.status(status).json({ error: status >= 500 && !err.expose && !err.message?.startsWith('Publishing failed') ? 'Internal error' : err.message, code: err.code });
   });
-  app.locals = { ...app.locals, store, audit, repo };
+  app.locals = { ...app.locals, store, audit, repo, cfg };
   return app;
 }
 

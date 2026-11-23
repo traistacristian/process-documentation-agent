@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const TENANT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const ADMIN_KEYS = ['categories', 'capture', 'retention', 'notifications', 'invitations', 'aiPolicy'];
 
@@ -33,6 +34,7 @@ export function loadConfig(overrides = {}) {
   if (env.PORT) cfg.port = Number(env.PORT);
   if (env.PDA_DATA_DIR) cfg.dataDir = env.PDA_DATA_DIR;
   if (env.PDA_AUTH_MODE) cfg.auth.mode = env.PDA_AUTH_MODE;
+  if (env.PDA_MULTI_TENANT) cfg.multiTenant = env.PDA_MULTI_TENANT === 'true';
   if (env.PDA_REPOSITORY_MODE) cfg.repository.mode = env.PDA_REPOSITORY_MODE;
   if (env.PDA_AI_PROVIDER) cfg.ai.provider = env.PDA_AI_PROVIDER;
   if (env.ENTRA_TENANT_ID) cfg.auth.entra.tenantId = env.ENTRA_TENANT_ID;
@@ -60,12 +62,36 @@ export function loadConfig(overrides = {}) {
   cfg.dataDir = path.resolve(ROOT, cfg.dataDir);
   if (cfg.repository.local?.path) cfg.repository.local.path = path.resolve(ROOT, cfg.repository.local.path.replace('./data', cfg.dataDir));
 
+  cfg._root = ROOT;
+  return applySavedSettings(cfg);
+}
+
+// Admin settings saved at runtime (<dataDir>/settings.json), for the keys in ADMIN_KEYS.
+function applySavedSettings(cfg) {
   const settingsFile = path.join(cfg.dataDir, 'settings.json');
   const saved = readJson(settingsFile) || {};
   for (const k of ADMIN_KEYS) if (saved[k] !== undefined) cfg[k] = isObj(saved[k]) ? deepMerge(cfg[k], saved[k]) : saved[k];
   cfg._settingsFile = settingsFile;
-  cfg._root = ROOT;
   return cfg;
+}
+
+// Multi-tenant: the configuration of one customer organisation (tenant). It starts from the platform
+// configuration (config/default.json + environment, without the platform's own saved settings) and
+// differs in:
+//   - data:      <platform dataDir>/tenants/<tenant id>/ holds this tenant's recordings, drafts,
+//                screenshots, audit log, search index, local repository and settings.json
+//   - sign-in:   tokens of this tenant only; the user comes from the SaaS front (auth.upstream)
+//   - repository: the tenant's own (its SharePoint site, set during onboarding), else a local folder
+//   - settings:  the tenant's own categories, capture policy, retention, AI policy
+export function tenantConfig(platform, tenant) {
+  if (!TENANT_ID.test(tenant?.id || '')) throw new Error('Invalid tenant id');
+  const base = JSON.parse(JSON.stringify(platform));
+  const cfg = { ...base, multiTenant: false, tenant: { id: tenant.id, name: tenant.name || '' }, _root: platform._root };
+  cfg.dataDir = path.join(platform.dataDir, 'tenants', tenant.id.toLowerCase());
+  cfg.auth = { ...cfg.auth, mode: 'entra', upstream: true, devUsers: [], entra: { ...cfg.auth.entra, tenantId: tenant.id } };
+  cfg.invitations = { groups: {} };
+  cfg.repository = deepMerge({ ...cfg.repository, mode: 'local', local: { path: path.join(cfg.dataDir, 'repository') } }, tenant.repository || {});
+  return applySavedSettings(cfg);
 }
 
 export function saveAdminSettings(cfg, patch) {

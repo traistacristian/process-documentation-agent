@@ -19,6 +19,7 @@ Then load `extension/` as an unpacked extension in Edge/Chrome and start a recor
 | [docs/REQUIREMENTS-AND-TESTING.md](docs/REQUIREMENTS-AND-TESTING.md) | Functional requirements, acceptance criteria, automated and manual test scenarios |
 | [docs/SECURITY.md](docs/SECURITY.md) | Roles, capture safeguards, GDPR, AI data handling |
 | [docs/GO-LIVE.md](docs/GO-LIVE.md) | **Production go-live**: Azure deployment, Entra/SharePoint setup script, GitHub Actions, client rollout, pilot |
+| [docs/MULTI-TENANT.md](docs/MULTI-TENANT.md) | **Multi-tenant (SaaS) mode**: one deployment for many organisations, tenant registry, data isolation |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local run, configuration, Entra / SharePoint / Azure setup, what is not yet verified |
 | [docs/AI-AGENT.md](docs/AI-AGENT.md) | Agent instructions, model call and guardrails |
 | [docs/screenshots/](docs/screenshots/) | Screens captured by the end-to-end test |

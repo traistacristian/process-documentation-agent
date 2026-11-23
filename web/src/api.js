@@ -19,6 +19,7 @@ export async function loadConfig() {
     sdk.app.notifySuccess();
     document.documentElement.classList.add('in-teams');
     if (['sidePanel', 'meetingStage'].includes(teams.context.page?.frameContext)) document.documentElement.classList.add('teams-panel');
+    await loadTenantConfig();
     return config;
   }
   if (config.authMode === 'entra') {
@@ -31,9 +32,20 @@ export async function loadConfig() {
       const acc = msal.getAllAccounts()[0];
       if (acc) msal.setActiveAccount(acc); else await msal.loginRedirect({ scopes: [config.entra.scope] });
     }
+    await loadTenantConfig();
   }
   return config;
 }
+
+// Multi-tenant deployment: before sign-in /api/config only says how to sign in; signed in, it returns
+// the settings of the user's organisation (or says that the organisation has not set up the app).
+async function loadTenantConfig() {
+  if (!config.multiTenant) return;
+  const fresh = await (await fetch('/api/config', { headers: await headers() })).json();
+  config = { ...config, ...fresh };
+}
+// Signed in, but the organisation cannot use the app: { status: 'not_onboarded' | 'ended', id }.
+export const tenantProblem = () => (config?.multiTenant && config.tenant?.status && config.tenant.status !== 'ready' ? config.tenant : null);
 
 export const getConfig = () => config;
 export const currentAccount = () => (teams ? { name: teams.context.user?.displayName || teams.context.user?.userPrincipalName, username: teams.context.user?.userPrincipalName } : msal?.getActiveAccount() || null);
@@ -48,7 +60,7 @@ export const isSignedOut = () => { try { return config?.authMode !== 'entra' && 
 export const signIn = () => { try { sessionStorage.removeItem('pda.signedOut'); } catch { /* ignore */ } location.reload(); };
 // Re-reads the settings an admin can change (categories, capture policy) without signing in again.
 export async function refreshConfig() {
-  try { const fresh = await (await fetch('/api/config', { cache: 'no-store' })).json(); Object.assign(config, fresh); } catch { /* keep the cached copy */ }
+  try { const fresh = await (await fetch('/api/config', { cache: 'no-store', headers: config?.multiTenant ? await headers() : {} })).json(); Object.assign(config, fresh); } catch { /* keep the cached copy */ }
   return config;
 }
 export const devUser = () => { try { return localStorage.getItem('pda.devUser') || config?.devUsers?.[2]?.id; } catch { return config?.devUsers?.[2]?.id; } };

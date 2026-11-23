@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, getConfig, devUser, setDevUser, signOut, isSignedOut, signIn, inTeams } from './api.js';
+import { api, getConfig, devUser, setDevUser, signOut, isSignedOut, signIn, inTeams, tenantProblem } from './api.js';
 import { usePoll } from './util.jsx';
 import Landing from './pages/Landing.jsx';
 import NewProcess from './pages/NewProcess.jsx';
@@ -104,6 +104,22 @@ function SignedOut() {
   );
 }
 
+// Multi-tenant: the person signed in, but their organisation has not set up the app or its
+// subscription has ended.
+function TenantProblem({ tenant }) {
+  return (
+    <main><div className="panel" style={{ maxWidth: 520, margin: '80px auto', textAlign: 'center', padding: 36 }} data-testid="tenant-problem">
+      <span className="logo-mark">P</span>
+      <h1 style={{ marginTop: 14 }}>{tenant.status === 'ended' ? 'Your subscription has ended' : 'Your organisation has not set up the app yet'}</h1>
+      <p className="muted">{tenant.status === 'ended'
+        ? 'Ask your Microsoft 365 administrator to renew the subscription. Documents already published stay in your SharePoint.'
+        : 'Ask your Microsoft 365 administrator to add the Process Documentation Agent to your organisation.'}</p>
+      <p className="small muted">Organisation (tenant) ID: <code>{tenant.id}</code></p>
+      <button className="btn" onClick={signOut}>Sign out</button>
+    </div></main>
+  );
+}
+
 // Pages visited in this tab, so Back returns to the previous page of the app (not to another site).
 const visited = [location.hash.slice(1) || '/'];
 addEventListener('hashchange', () => {
@@ -144,14 +160,17 @@ export default function App() {
   const cfg = getConfig();
   const [me, setMe] = useState(null);
   const [active, setActive] = useState(null);
-  useEffect(() => { api('/api/me').then(setMe).catch(() => setMe(null)); }, []);
+  const problem = tenantProblem();
+  useEffect(() => { if (!problem) api('/api/me').then(setMe).catch(() => setMe(null)); }, []);
   usePoll(async () => {
+    if (problem) return;
     const list = await api('/api/sessions').catch(() => []);
     setActive(list.find((s) => s.status === 'recording' || s.status === 'paused' ) || null);
   }, 4000, [route]);
 
   const [, page, id] = route.split('?')[0].split('/');
   if (isSignedOut()) return <SignedOut />;
+  if (problem) return <TenantProblem tenant={problem} />;
   let view;
   if (!page) view = <Landing me={me} />;
   else if (page === 'new') view = <NewProcess me={me} />;
@@ -180,7 +199,7 @@ export default function App() {
         </nav>
         <div className="spacer" />
         {active && page !== 'record' && <a className="rec-pill" href={`#/record/${active.id}`}>{active.status === 'paused' ? '❚❚ PAUSED' : '● RECORDING'} – {active.meta.title}</a>}
-        {me?.roles.includes('Admin') && <InviteMenu />}
+        {me?.roles.includes('Admin') && !cfg.multiTenant && <InviteMenu />}
         {cfg.authMode === 'dev' ? (
           <label className="devswitch" title="Demo mode: switch between test users to see each role. In production users sign in with their Microsoft account.">
             Viewing as
