@@ -48,7 +48,9 @@ export function createEntraVerifier({ tenantId, apiClientId, jwks }) {
 
 export function userFromClaims(payload) {
   const roles = (payload.roles || []).map((r) => ENTRA_ROLE_MAP[r]).filter(Boolean);
-  return { id: payload.oid, name: payload.name || payload.preferred_username, email: payload.preferred_username, roles, tenantId: payload.tid };
+  // directoryRoles: Entra directory role template ids ("wids"), used only to recognise the
+  // administrator who signs an organisation up (multi-tenant deployment).
+  return { id: payload.oid, name: payload.name || payload.preferred_username, email: payload.preferred_username, roles, tenantId: payload.tid, directoryRoles: payload.wids || [] };
 }
 
 export function createAuth(cfg) {

@@ -22,6 +22,9 @@ export async function loadConfig() {
     await loadTenantConfig();
     return config;
   }
+  // The sign-up page of the multi-tenant deployment is public: the administrator gives admin consent
+  // before anybody of the organisation can sign in.
+  if (config.multiTenant && location.hash.startsWith('#/signup')) return config;
   if (config.authMode === 'entra') {
     const { PublicClientApplication } = await import('@azure/msal-browser');
     msal = new PublicClientApplication({ auth: { clientId: config.entra.clientId, authority: `https://login.microsoftonline.com/${config.entra.tenantId}`, redirectUri: location.origin }, cache: { cacheLocation: 'sessionStorage' } });

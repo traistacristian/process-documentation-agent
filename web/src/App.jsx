@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import Setup, { Signup, StartTrial } from './pages/Setup.jsx';
 import { api, getConfig, devUser, setDevUser, signOut, isSignedOut, signIn, inTeams, tenantProblem } from './api.js';
 import { usePoll } from './util.jsx';
 import Landing from './pages/Landing.jsx';
@@ -107,13 +108,14 @@ function SignedOut() {
 // Multi-tenant: the person signed in, but their organisation has not set up the app or its
 // subscription has ended.
 function TenantProblem({ tenant }) {
+  if (tenant.status === 'not_onboarded' && tenant.canSignUp) return <StartTrial tenant={tenant} />;
   return (
     <main><div className="panel" style={{ maxWidth: 520, margin: '80px auto', textAlign: 'center', padding: 36 }} data-testid="tenant-problem">
       <span className="logo-mark">P</span>
       <h1 style={{ marginTop: 14 }}>{tenant.status === 'ended' ? 'Your subscription has ended' : 'Your organisation has not set up the app yet'}</h1>
       <p className="muted">{tenant.status === 'ended'
         ? 'Ask your Microsoft 365 administrator to renew the subscription. Documents already published stay in your SharePoint.'
-        : 'Ask your Microsoft 365 administrator to add the Process Documentation Agent to your organisation.'}</p>
+        : <>Ask your Microsoft 365 administrator to add the Process Documentation Agent to your organisation. Administrators start here: <a href="#/signup">add to my organisation</a>.</>}</p>
       <p className="small muted">Organisation (tenant) ID: <code>{tenant.id}</code></p>
       <button className="btn" onClick={signOut}>Sign out</button>
     </div></main>
@@ -142,7 +144,7 @@ function parentOf(page, id) {
   return '#/';
 }
 
-const PAGE_NAMES = { new: 'Record a new process', update: 'Update a process', record: 'Recording', review: 'Review the draft', library: 'Process library', admin: 'Administration', help: 'Help', meeting: 'Meeting recording', teams: 'From a Teams meeting' };
+const PAGE_NAMES = { new: 'Record a new process', update: 'Update a process', record: 'Recording', review: 'Review the draft', library: 'Process library', admin: 'Administration', help: 'Help', meeting: 'Meeting recording', teams: 'From a Teams meeting', setup: 'Organisation setup' };
 
 function BackBar({ page, id }) {
   const back = () => { if (visited.length > 1) history.back(); else location.hash = parentOf(page, id); };
@@ -160,7 +162,10 @@ export default function App() {
   const cfg = getConfig();
   const [me, setMe] = useState(null);
   const [active, setActive] = useState(null);
-  const problem = tenantProblem();
+  const [, page, id] = route.split('?')[0].split('/');
+  // Signed in but the organisation cannot use the app, or the public sign-up page: no API calls.
+  const publicPage = cfg.multiTenant && page === 'signup';
+  const problem = tenantProblem() || (publicPage ? { status: 'signup' } : null);
   useEffect(() => { if (!problem) api('/api/me').then(setMe).catch(() => setMe(null)); }, []);
   usePoll(async () => {
     if (problem) return;
@@ -168,7 +173,7 @@ export default function App() {
     setActive(list.find((s) => s.status === 'recording' || s.status === 'paused' ) || null);
   }, 4000, [route]);
 
-  const [, page, id] = route.split('?')[0].split('/');
+  if (publicPage) return <Signup />;
   if (isSignedOut()) return <SignedOut />;
   if (problem) return <TenantProblem tenant={problem} />;
   let view;
@@ -179,6 +184,7 @@ export default function App() {
   else if (page === 'review') view = <Review id={id} me={me} />;
   else if (page === 'library') view = <Library processId={id} />;
   else if (page === 'admin') view = <Admin />;
+  else if (page === 'setup') view = <Setup me={me} />;
   else if (page === 'help') view = <Help me={me} />;
   else if (page === 'meeting') view = <Meeting draftId={id} />;
   else if (page === 'teams' && id === 'config') return <TeamsConfig />;
@@ -196,6 +202,7 @@ export default function App() {
           {cfg.teams && link('/teams', 'From Teams')}
           {link('/help', 'Help')}
           {me?.roles.includes('Admin') && link('/admin', 'Administration')}
+          {me?.roles.includes('Admin') && cfg.multiTenant && link('/setup', 'Organisation setup')}
         </nav>
         <div className="spacer" />
         {active && page !== 'record' && <a className="rec-pill" href={`#/record/${active.id}`}>{active.status === 'paused' ? '❚❚ PAUSED' : '● RECORDING'} – {active.meta.title}</a>}
@@ -210,7 +217,10 @@ export default function App() {
         ) : null}
         <AccountMenu me={me} />
       </header>
-      <main>{page && <BackBar page={page} id={id} />}{view}</main>
+      <main>
+        {cfg.multiTenant && me?.roles.includes('Admin') && !cfg.tenant?.sharepoint && page !== 'setup' && <div className="alert warn" data-testid="setup-banner">Published documents are kept in a temporary folder until a SharePoint site is connected. <a href="#/setup">Finish the organisation setup</a>.</div>}
+        {page && <BackBar page={page} id={id} />}{view}
+      </main>
     </>
   );
 }

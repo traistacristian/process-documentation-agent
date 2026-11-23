@@ -35,6 +35,9 @@ export function loadConfig(overrides = {}) {
   if (env.PDA_DATA_DIR) cfg.dataDir = env.PDA_DATA_DIR;
   if (env.PDA_AUTH_MODE) cfg.auth.mode = env.PDA_AUTH_MODE;
   if (env.PDA_MULTI_TENANT) cfg.multiTenant = env.PDA_MULTI_TENANT === 'true';
+  if (env.PDA_SELF_SIGNUP) cfg.saas = { ...(cfg.saas || {}), selfSignup: env.PDA_SELF_SIGNUP !== 'false' };
+  if (env.PDA_TRIAL_DAYS) cfg.saas = { ...(cfg.saas || {}), trialDays: Number(env.PDA_TRIAL_DAYS) };
+  if (env.PDA_MI_CLIENT_ID) cfg.saas = { ...(cfg.saas || {}), miClientId: env.PDA_MI_CLIENT_ID };
   if (env.PDA_REPOSITORY_MODE) cfg.repository.mode = env.PDA_REPOSITORY_MODE;
   if (env.PDA_AI_PROVIDER) cfg.ai.provider = env.PDA_AI_PROVIDER;
   if (env.ENTRA_TENANT_ID) cfg.auth.entra.tenantId = env.ENTRA_TENANT_ID;
@@ -86,7 +89,7 @@ function applySavedSettings(cfg) {
 export function tenantConfig(platform, tenant) {
   if (!TENANT_ID.test(tenant?.id || '')) throw new Error('Invalid tenant id');
   const base = JSON.parse(JSON.stringify(platform));
-  const cfg = { ...base, multiTenant: false, tenant: { id: tenant.id, name: tenant.name || '' }, _root: platform._root };
+  const cfg = { ...base, multiTenant: false, tenant: { id: tenant.id, name: tenant.name || '', status: tenant.status, trialEndsAt: tenant.trialEndsAt || null }, _root: platform._root };
   cfg.dataDir = path.join(platform.dataDir, 'tenants', tenant.id.toLowerCase());
   cfg.auth = { ...cfg.auth, mode: 'entra', upstream: true, devUsers: [], entra: { ...cfg.auth.entra, tenantId: tenant.id } };
   cfg.invitations = { groups: {} };

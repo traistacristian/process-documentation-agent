@@ -26,9 +26,10 @@ const enc = (p) => p.split('/').map(encodeURIComponent).join('/');
 const SIMPLE_UPLOAD_LIMIT = 4 * 1024 * 1024;
 
 export class SharePointRepository {
-  constructor(cfg, { fetchImpl, sleep, credential } = {}) {
+  // tokenProvider: multi-tenant deployment (auth 'federated'), app-only tokens for the customer's tenant.
+  constructor(cfg, { fetchImpl, sleep, credential, tokenProvider } = {}) {
     this.cfg = cfg; this.sp = cfg.repository.sharepoint;
-    this.graph = new GraphClient({ tenantId: this.sp.tenantId, clientId: this.sp.clientId, clientSecret: process.env[this.sp.clientSecretEnv] || this.sp.clientSecret, auth: this.sp.auth || 'secret', credential, fetchImpl, sleep });
+    this.graph = new GraphClient({ tenantId: this.sp.tenantId, clientId: this.sp.clientId, clientSecret: process.env[this.sp.clientSecretEnv] || this.sp.clientSecret, auth: this.sp.auth || 'secret', credential, tokenProvider, fetchImpl, sleep });
     this.ids = null;
   }
 
