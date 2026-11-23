@@ -17,7 +17,8 @@ const err = (status, message, code) => Object.assign(new Error(message), { statu
 export function createInviter(cfg, { graph } = {}) {
   const groups = () => cfg.invitations?.groups || {};
   const configured = () => ROLE_NAMES.some((r) => GUID.test(groups()[r] || ''));
-  const available = () => cfg.auth.mode === 'entra' || !!graph;
+  // Not in the multi-tenant deployment: customers manage their own users and app roles in their tenant.
+  const available = () => !cfg.tenant && (cfg.auth.mode === 'entra' || !!graph);
   let client = graph;
   const g = () => {
     if (!available()) throw err(409, 'Inviting testers needs Microsoft sign-in (Entra ID mode). In the demo mode the test users are fixed.', 'NOT_AVAILABLE');
