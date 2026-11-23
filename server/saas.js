@@ -24,6 +24,8 @@ import { createApp, securityHeaders } from './app.js';
 import { createEntraVerifier, userFromClaims } from './auth.js';
 import { tenantConfig } from './config.js';
 import { TenantRegistry } from './tenants.js';
+import { createFederatedIdentity } from './federated.js';
+import { mountOnboarding, createSharePointConnector, effectiveUser, isDirectoryAdmin } from './onboarding.js';
 
 const httpError = (status, message, code) => Object.assign(new Error(message), { status, code });
 
@@ -33,6 +35,9 @@ export function createSaaSApp(cfg, deps = {}) {
   const registry = deps.registry || new TenantRegistry(cfg.dataDir);
   const verify = deps.verifyToken || createEntraVerifier({ apiClientId });
   const apps = new Map();
+  // Signs in to customers' tenants as the multi-tenant app, without secrets (server/federated.js).
+  const federated = deps.federated || createFederatedIdentity({ clientId: apiClientId, miClientId: cfg.saas?.miClientId || cfg.teams?.miClientId });
+  const connector = deps.sharepointConnector || createSharePointConnector({ cfg, federated });
 
   function tenantApp(tid) {
     const t = registry.get(tid);
@@ -42,7 +47,9 @@ export function createSaaSApp(cfg, deps = {}) {
     if (hit && hit.version === t.updatedAt) return hit.app;
     const tcfg = tenantConfig(cfg, t);
     fs.mkdirSync(tcfg.dataDir, { recursive: true });
-    const app = createApp(tcfg, { ...(deps.tenantDeps?.(key) || {}), issuePairingCode: (sessionId, expiresAt) => registry.issuePairingCode(key, sessionId, expiresAt) });
+    const extra = deps.tenantDeps?.(key) || {};
+    const repoDeps = tcfg.repository.sharepoint?.auth === 'federated' ? { tokenProvider: () => federated.appToken(key), ...(extra.repoDeps || {}) } : extra.repoDeps;
+    const app = createApp(tcfg, { ...extra, repoDeps, issuePairingCode: (sessionId, expiresAt) => registry.issuePairingCode(key, sessionId, expiresAt) });
     deps.onTenantApp?.(app, t);
     apps.set(key, { app, version: t.updatedAt });
     return app;
@@ -91,12 +98,12 @@ export function createSaaSApp(cfg, deps = {}) {
     let user = null;
     try { user = await userOf(req); } catch { /* not signed in yet: platform information only */ }
     const t = user && registry.get(user.tenantId);
-    if (t && registry.canUse(t.id)) { req.upstreamUser = user; return tenantApp(t.id)(req, res, next); }
+    if (t && registry.canUse(t.id)) { req.upstreamUser = effectiveUser(user, t); return tenantApp(t.id)(req, res, next); }
     res.json({
       authMode: 'entra',
       multiTenant: true,
       entra: { tenantId: 'organizations', clientId: spaClientId, scope: apiScope },
-      tenant: user ? { id: user.tenantId, status: t ? 'ended' : 'not_onboarded' } : undefined,
+      tenant: user ? { id: user.tenantId, status: t ? 'ended' : 'not_onboarded', canSignUp: !t && cfg.saas?.selfSignup !== false && isDirectoryAdmin(user) } : undefined,
       categories: cfg.categories,
       aiOffCategories: [],
       repository: { mode: 'none', label: '' },
@@ -117,14 +124,16 @@ export function createSaaSApp(cfg, deps = {}) {
     return tenantApp(tid)(req, res, next);
   });
 
+  // Admin consent, sign-up and setup (before the tenant needs to exist).
+  mountOnboarding(app, { cfg, registry, userOf, bearer, connector, tenantConfigFor: (t) => tenantConfig(cfg, t), wrap });
+
   // Everything else under /api: a signed-in user of an onboarded tenant. (Routes, not app.use, so the
   // tenant's app sees the full path.)
   app.all(/^\/api(\/.*)?$/, wrap(async (req, res, next) => {
     let user;
     try { user = await userOf(req); } catch { return res.status(401).json({ error: 'Invalid or expired token' }); }
     if (!user) return res.status(401).json({ error: 'Not signed in' });
-    checkTenant(user.tenantId);
-    req.upstreamUser = user;
+    req.upstreamUser = effectiveUser(user, checkTenant(user.tenantId));
     return tenantApp(user.tenantId)(req, res, next);
   }));
 
@@ -140,6 +149,6 @@ export function createSaaSApp(cfg, deps = {}) {
   });
 
   // For the hourly jobs (retention) and the tenant admin tool.
-  app.locals = { ...app.locals, registry, tenantApp, cfg };
+  app.locals = { ...app.locals, registry, tenantApp, cfg, federated };
   return app;
 }
