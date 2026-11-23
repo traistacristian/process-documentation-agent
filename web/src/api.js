@@ -25,6 +25,20 @@ export async function loadConfig() {
   // The sign-up page of the multi-tenant deployment is public: the administrator gives admin consent
   // before anybody of the organisation can sign in.
   if (config.multiTenant && location.hash.startsWith('#/signup')) return config;
+  // Marketplace landing page (/subscribe?token=...): the buyer signs in to the web app only (their
+  // organisation may not have added the API yet); the purchase token survives the sign-in redirect.
+  if (config.multiTenant && location.pathname === '/subscribe') {
+    const t = new URLSearchParams(location.search).get('token');
+    try { if (t) sessionStorage.setItem('pda.mpToken', t); } catch { /* ignore */ }
+    const { PublicClientApplication } = await import('@azure/msal-browser');
+    msal = new PublicClientApplication({ auth: { clientId: config.entra.clientId, authority: 'https://login.microsoftonline.com/organizations', redirectUri: `${location.origin}/subscribe` }, cache: { cacheLocation: 'sessionStorage' } });
+    await msal.initialize();
+    const r = await msal.handleRedirectPromise();
+    if (r?.account) msal.setActiveAccount(r.account);
+    if (!msal.getActiveAccount()) { const acc = msal.getAllAccounts()[0]; if (acc) msal.setActiveAccount(acc); else await msal.loginRedirect({ scopes: ['openid', 'profile', 'email'] }); }
+    config.landing = true;
+    return config;
+  }
   if (config.authMode === 'entra') {
     const { PublicClientApplication } = await import('@azure/msal-browser');
     msal = new PublicClientApplication({ auth: { clientId: config.entra.clientId, authority: `https://login.microsoftonline.com/${config.entra.tenantId}`, redirectUri: location.origin }, cache: { cacheLocation: 'sessionStorage' } });
@@ -51,6 +65,15 @@ async function loadTenantConfig() {
 export const tenantProblem = () => (config?.multiTenant && config.tenant?.status && config.tenant.status !== 'ready' ? config.tenant : null);
 
 export const getConfig = () => config;
+// Marketplace landing page: the purchase token, and calls signed with the web app's ID token.
+export const marketplaceToken = () => { try { return sessionStorage.getItem('pda.mpToken'); } catch { return null; } };
+export async function landingApi(path, body) {
+  const t = await msal.acquireTokenSilent({ scopes: ['openid', 'profile', 'email'] }).catch(() => msal.acquireTokenRedirect({ scopes: ['openid', 'profile', 'email'] }));
+  const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${t.idToken}` }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw Object.assign(new Error(data?.error || `Request failed (${res.status})`), { status: res.status, code: data?.code });
+  return data;
+}
 export const currentAccount = () => (teams ? { name: teams.context.user?.displayName || teams.context.user?.userPrincipalName, username: teams.context.user?.userPrincipalName } : msal?.getActiveAccount() || null);
 // Signs out of the app. Entra: ends the Microsoft session for this app and returns to the start page.
 // Demo mode: shows the signed-out screen until "Sign in" is clicked.

@@ -25,6 +25,9 @@ import { createEntraVerifier, userFromClaims } from './auth.js';
 import { tenantConfig } from './config.js';
 import { TenantRegistry } from './tenants.js';
 import { createFederatedIdentity } from './federated.js';
+import { evaluate, checkRequest, seatError } from './licence.js';
+import { mountSubscription } from './subscription.js';
+import { mountMarketplace, createMarketplaceClient, createWebhookVerifier, landingVerifier } from './marketplace.js';
 import { mountOnboarding, createSharePointConnector, effectiveUser, isDirectoryAdmin } from './onboarding.js';
 
 const httpError = (status, message, code) => Object.assign(new Error(message), { status, code });
@@ -49,11 +52,24 @@ export function createSaaSApp(cfg, deps = {}) {
     fs.mkdirSync(tcfg.dataDir, { recursive: true });
     const extra = deps.tenantDeps?.(key) || {};
     const repoDeps = tcfg.repository.sharepoint?.auth === 'federated' ? { tokenProvider: () => federated.appToken(key), ...(extra.repoDeps || {}) } : extra.repoDeps;
-    const app = createApp(tcfg, { ...extra, repoDeps, issuePairingCode: (sessionId, expiresAt) => registry.issuePairingCode(key, sessionId, expiresAt) });
+    const app = createApp(tcfg, { ...extra, repoDeps, issuePairingCode: (sessionId, expiresAt) => registry.issuePairingCode(key, sessionId, expiresAt), onAiDraft: () => registry.recordAi(key) });
     deps.onTenantApp?.(app, t);
     apps.set(key, { app, version: t.updatedAt });
     return app;
   }
+
+  // The tenant's app with the licence state of this moment (read-only, AI quota) applied to its
+  // configuration; the trial end and the monthly counters change without the record changing.
+  function licensedApp(t) {
+    const app = tenantApp(t.id);
+    const lic = evaluate(cfg, t);
+    const { aiUsed } = registry.usage(t.id);
+    app.locals.cfg.tenant.licence = { readOnly: lic.readOnly, reason: lic.reason, plan: lic.plan, trialEndsAt: lic.trialEndsAt };
+    app.locals.cfg.tenant.noAdmins = !t.admins?.length;
+    app.locals.cfg.ai.quotaExceeded = lic.aiGenerations !== null && aiUsed >= lic.aiGenerations;
+    return { app, lic };
+  }
+  const takeSeat = (t, user, lic) => { if (!registry.useSeat(t.id, user.id, lic.seats)) throw seatError(lic.seats); };
 
   const notOnboarded = () => httpError(403, 'Your organisation has not set up Doku yet. Ask your Microsoft 365 administrator to add it.', 'TENANT_NOT_ONBOARDED');
   const ended = () => httpError(403, "Your organisation's Doku subscription has ended. Ask your Microsoft 365 administrator to renew it.", 'SUBSCRIPTION_ENDED');
@@ -98,7 +114,14 @@ export function createSaaSApp(cfg, deps = {}) {
     let user = null;
     try { user = await userOf(req); } catch { /* not signed in yet: platform information only */ }
     const t = user && registry.get(user.tenantId);
-    if (t && registry.canUse(t.id)) { req.upstreamUser = effectiveUser(user, t); return tenantApp(t.id)(req, res, next); }
+    if (t && registry.canUse(t.id)) {
+      const { app: tapp, lic } = licensedApp(t);
+      if (!registry.useSeat(t.id, user.id, lic.seats)) {
+        return res.json({ authMode: 'entra', multiTenant: true, entra: { tenantId: 'organizations', clientId: spaClientId, scope: apiScope }, tenant: { id: t.id, name: t.name, status: 'no_seat', seats: lic.seats }, categories: [], aiOffCategories: [], repository: { mode: 'none', label: '' } });
+      }
+      req.upstreamUser = effectiveUser(user, t);
+      return tapp(req, res, next);
+    }
     res.json({
       authMode: 'entra',
       multiTenant: true,
@@ -116,16 +139,31 @@ export function createSaaSApp(cfg, deps = {}) {
     if (!pairAllowed(req.ip)) return res.status(429).json({ error: 'Too many attempts. Wait a minute and try again.' });
     const tid = registry.tenantForCode(String(req.body?.code || '').replace(/\D/g, ''));
     if (!tid || !registry.canUse(tid)) { pairFailed(req.ip); return res.status(404).json({ error: 'No active recording with this pairing code' }); }
-    return tenantApp(tid)(req, res, next);
+    const { app: tapp, lic } = licensedApp(registry.get(tid));
+    checkRequest(lic, req.method);
+    return tapp(req, res, next);
   });
   app.all(/^\/api\/capture\//, (req, res, next) => {
     const tid = registry.tenantForSession(req.get('x-session-id'));
     if (!tid || !registry.canUse(tid)) return res.status(401).json({ error: 'Invalid capture token' });
-    return tenantApp(tid)(req, res, next);
+    const { app: tapp, lic } = licensedApp(registry.get(tid));
+    checkRequest(lic, req.method);
+    return tapp(req, res, next);
   });
 
   // Admin consent, sign-up and setup (before the tenant needs to exist).
   mountOnboarding(app, { cfg, registry, userOf, bearer, connector, tenantConfigFor: (t) => tenantConfig(cfg, t), wrap });
+  mountSubscription(app, { cfg, registry, userOf, wrap });
+  // Microsoft Marketplace SaaS offer: landing page and webhook (server/marketplace.js).
+  const mp = cfg.saas?.marketplace || {};
+  const mpAppId = mp.appId || apiClientId;
+  mountMarketplace(app, {
+    cfg, registry, wrap,
+    verifyUser: deps.verifyLandingToken || landingVerifier(spaClientId),
+    client: deps.marketplace || createMarketplaceClient({ publisherTenantId: mp.publisherTenantId, appId: mpAppId, federated }),
+    verifyWebhook: deps.verifyWebhookToken || (mp.publisherTenantId ? createWebhookVerifier({ publisherTenantId: mp.publisherTenantId, appId: mpAppId }) : async () => { throw new Error('Marketplace is not configured'); }),
+    log: deps.platformLog || ((what, details) => console.log(JSON.stringify({ ts: new Date().toISOString(), event: what, ...details }))),
+  });
 
   // Everything else under /api: a signed-in user of an onboarded tenant. (Routes, not app.use, so the
   // tenant's app sees the full path.)
@@ -133,8 +171,12 @@ export function createSaaSApp(cfg, deps = {}) {
     let user;
     try { user = await userOf(req); } catch { return res.status(401).json({ error: 'Invalid or expired token' }); }
     if (!user) return res.status(401).json({ error: 'Not signed in' });
-    req.upstreamUser = effectiveUser(user, checkTenant(user.tenantId));
-    return tenantApp(user.tenantId)(req, res, next);
+    const t = checkTenant(user.tenantId);
+    const { app: tapp, lic } = licensedApp(t);
+    takeSeat(t, user, lic);
+    checkRequest(lic, req.method);
+    req.upstreamUser = effectiveUser(user, t);
+    return tapp(req, res, next);
   }));
 
   const dist = path.join(cfg._root, 'web/dist');

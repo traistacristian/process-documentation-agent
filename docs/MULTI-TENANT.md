@@ -16,14 +16,15 @@ The single-organisation deployment (docs/GO-LIVE.md) is unchanged and stays the 
 | Roles without Entra configuration: the admin who signed up is Admin, everybody else gets a default role | Done, tested |
 | Customer's SharePoint site connected from the setup page, app-only access to that one site, no secrets | Done, tested with a mocked Graph; not yet run against real tenants |
 | `scripts/Setup-SaaSPublisher.ps1`: multi-tenant app registrations, federated credential, App Service settings | Written; not yet run |
-| Licence rules (trial end, read-only when suspended, seats, AI quota), Marketplace SaaS offer | PR 3 and PR 4 |
+| Licence rules: trial end and suspension make the app read-only, seats per month, monthly AI quota | Done, tested |
+| Microsoft Marketplace SaaS offer: landing page, SaaS Fulfillment API v2, webhook | Done, tested against a fake Fulfillment API; not yet run against Partner Center |
 | Teams app for customer tenants (store listing) | After Marketplace; the Teams manifest needs the verified publisher domain |
 | Table/Blob Storage instead of files, more than one instance | Later |
 
 ## How a customer is onboarded
 
 1. **Admin consent.** A Microsoft 365 administrator of the customer opens `https://<your app>/#/signup` and clicks *Add to my organisation*. Microsoft's consent page opens twice: once for the API app (its Graph permissions), once for the web app. Consent adds both apps to the customer's tenant; Doku stores nothing yet.
-2. **Trial.** Back in the app, the administrator signs in and starts the trial. Only a Global, Privileged Role, Application or Cloud Application Administrator can (token claim `wids`). The tenant is registered with status `trial` (30 days, `PDA_TRIAL_DAYS`); that administrator becomes the organisation's first Admin. With `PDA_SELF_SIGNUP=false` only tenants you add with `npm run tenant` can start.
+2. **Trial.** Back in the app, the administrator signs in and starts the trial. Only a Global, Privileged Role, Application or Cloud Application Administrator can (token claim `wids`). The tenant is registered with status `trial`: at most 5 days (`PDA_TRIAL_DAYS` can shorten it) and 1 seat, so only that administrator, who becomes the organisation's first Admin, can use it. Nobody else gets a default role during the trial. With `PDA_SELF_SIGNUP=false` only tenants you add with `npm run tenant` can start.
 3. **Setup** (*Organisation setup* page, Admins only).
    - *Who can use the app:* everybody in the organisation gets the default role (Contributor unless changed). App roles assigned in the customer's Enterprise application still apply, so a customer can switch the default off and assign roles to groups instead.
    - *SharePoint:* the Admin enters the site address. The app grants itself `write` on that one site (Graph `Sites.Selected`), on behalf of the Admin, who must be a SharePoint administrator or the site owner. It then opens the site with its own app-only access, exactly as it will when publishing, and creates its columns and folders. Until a site is connected, published documents are kept in a folder in the tenant's data folder and Admins see a banner.
@@ -65,12 +66,61 @@ Locally (without Microsoft sign-in the app cannot be used, but the server starts
 PDA_MULTI_TENANT=true ENTRA_API_CLIENT_ID=<api app id> ENTRA_SPA_CLIENT_ID=<spa app id> npm start
 ```
 
+## Selling through Microsoft Marketplace
+
+The offer is a transactable SaaS offer in Partner Center (Microsoft commercial marketplace), priced per user per month. Plan ids in Partner Center should match the plan names below (`team`, `business`, …); otherwise map them with `saas.marketplace.planMap`. The quantity bought becomes the tenant's seats.
+
+**Partner Center → the offer → Technical configuration** (the setup script prints these):
+
+| Field | Value |
+|---|---|
+| Landing page URL | `https://<your app>/subscribe` |
+| Connection webhook | `https://<your app>/api/marketplace/webhook` |
+| Microsoft Entra tenant ID | your (publisher) tenant, `PDA_PUBLISHER_TENANT_ID` |
+| Microsoft Entra application ID | the multi-tenant API app (`ENTRA_API_CLIENT_ID`; another app with `PDA_MARKETPLACE_APP_ID`) |
+
+**Purchase.** Marketplace sends the buyer to `/subscribe?token=…`. The buyer signs in with a work account (only the web app, so the organisation does not need to have added Doku yet). The page resolves the purchase with the SaaS Fulfillment API and shows plan, users and organisation. *Activate* registers the customer's tenant (the subscription's beneficiary) as `active` with that plan and seats and activates the subscription. A trial that is bought keeps its data and loses its end date.
+
+- Bought by the organisation's own directory administrator: that person becomes its Admin; then *add the app* (admin consent) and *organisation setup* as above.
+- Bought by a partner for a customer (CSP, an MSP): the partner gets no access to the customer. The customer's first directory administrator who signs in becomes its Admin (*become its administrator* banner).
+
+**Changes** come through the webhook, whose token must be issued by Microsoft Entra in the publisher tenant, for our app, to the Marketplace application. Each event is read back from the Fulfillment API before it is applied:
+
+| Event | Effect |
+|---|---|
+| ChangePlan | plan changes (acknowledged to Marketplace) |
+| ChangeQuantity | seats change (acknowledged) |
+| Suspend | `suspended`: read-only |
+| Reinstate, Renew | `active` (Reinstate acknowledged) |
+| Unsubscribe | `cancelled`: no access; the data folder stays until you delete it |
+
+Calls to the Fulfillment API use a token for the Marketplace resource from the app's federated credential: no secret.
+
+## Plans and licence rules
+
+| Plan | Seats per month | AI-drafted documents per month |
+|---|---|---|
+| trial (self-service, at most 5 days) | 1 | 20 |
+| pilot | 25 | 300 |
+| team | 10 | 200 |
+| business | 50 | 1000 |
+
+Defaults live in `server/licence.js` and can be changed with `saas.plans` in the configuration; a tenant's own `seats` / `aiGenerations` override its plan.
+
+- **Read-only** when the trial has ended or the subscription is suspended: people can still read, download and delete; starting recordings, capture clients, generating, editing and publishing return HTTP 402.
+- **Seats**: distinct people per calendar month (UTC). When all are taken, a further person gets HTTP 402 `SEAT_LIMIT` (the web app explains it); people already counted this month keep access.
+- **AI quota**: over the monthly quota, documents are drafted by the rule-based engine (audit entry `draft.ai_quota_exceeded`). Screenshot privacy checks are not counted and keep running.
+- Admins see the plan and this month's usage on *Organisation setup* (`GET /api/subscription`).
+
 ## Managing tenants
 
 ```bash
 npm run tenant -- list
 npm run tenant -- add <tenant id> --name "Contoso" --status active --plan pilot
 npm run tenant -- set <tenant id> --status suspended
+npm run tenant -- set <tenant id> --status active --plan pilot --seats 25 --ai 300
+npm run tenant -- set <tenant id> --trial-ends 2026-12-31   # a longer trial for a pilot, set by you
+npm run tenant -- usage <tenant id>
 npm run tenant -- remove <tenant id>     # registry entry only; the data folder is kept
 ```
 

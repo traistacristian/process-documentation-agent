@@ -30,6 +30,8 @@ export class TenantRegistry {
     this.indexFile = path.join(this.dir, 'capture-index.json');
     this.tenants = this.#read(this.tenantsFile, {});
     this.index = { codes: {}, sessions: {}, ...this.#read(this.indexFile, {}) };
+    this.usageFile = path.join(this.dir, 'usage.json');
+    this.usageData = this.#read(this.usageFile, {});
   }
 
   #read(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
@@ -75,6 +77,37 @@ export class TenantRegistry {
   canUse(id) {
     const t = this.get(id);
     return !!t && t.status !== 'cancelled';
+  }
+
+  // ---- usage (licence) ----
+  // Per tenant and calendar month (UTC): the people who used the app (seats) and AI-drafted documents.
+  #month(tid, now = Date.now()) {
+    const m = new Date(now).toISOString().slice(0, 7);
+    const u = this.usageData[tid];
+    if (!u || u.month !== m) this.usageData[tid] = { month: m, users: [], ai: 0 };
+    return this.usageData[tid];
+  }
+
+  usage(id, now = Date.now()) {
+    const u = this.#month(TenantRegistry.normalizeId(id), now);
+    return { month: u.month, seatsUsed: u.users.length, aiUsed: u.ai };
+  }
+
+  // Takes a seat for this person this month. false when every seat is taken (seats = null: unlimited).
+  useSeat(id, userId, seats, now = Date.now()) {
+    const u = this.#month(TenantRegistry.normalizeId(id), now);
+    if (u.users.includes(userId)) return true;
+    if (seats !== null && seats !== undefined && u.users.length >= seats) return false;
+    u.users.push(userId);
+    this.#write(this.usageFile, this.usageData);
+    return true;
+  }
+
+  recordAi(id, now = Date.now()) {
+    const u = this.#month(TenantRegistry.normalizeId(id), now);
+    u.ai++;
+    this.#write(this.usageFile, this.usageData);
+    return u.ai;
   }
 
   // ---- capture routing ----

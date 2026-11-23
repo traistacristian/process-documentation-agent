@@ -55,7 +55,7 @@ test('admin consent: API app first, then the web app, then back to setup', async
   assert.match((await call('GET', '/api/onboarding/consent-callback?error=access_denied&state=api')).location, /#\/signup\?consent_error=access_denied/);
 });
 
-test('sign-up: only a directory administrator starts the trial; they become Admin, others Contributor', async () => {
+test('sign-up: only a directory administrator starts the trial: 5 days, 1 seat, only that admin', async () => {
   const cfgBefore = (await call('GET', '/api/config', null, user(N, 9))).body;
   assert.equal(cfgBefore.tenant.status, 'not_onboarded');
   assert.equal(cfgBefore.tenant.canSignUp, false);
@@ -67,15 +67,23 @@ test('sign-up: only a directory administrator starts the trial; they become Admi
   const started = await call('POST', '/api/onboarding/start', { name: 'New Co' }, adminTok);
   assert.equal(started.status, 201);
   assert.equal(started.body.status, 'trial'); assert.equal(started.body.name, 'New Co');
-  assert.ok(started.body.trialEndsAt > Date.now() + 29 * 86400_000);
+  const days = (started.body.trialEndsAt - Date.now()) / 86400_000;
+  assert.ok(days > 4.9 && days <= 5, `trial lasts ${days} days`);
   assert.deepEqual(started.body.admins, [oid(2)]);
+  assert.equal(started.body.defaultRole, '');
   // Again: no second record, same tenant.
   assert.equal((await call('POST', '/api/onboarding/start', { name: 'Other' }, adminTok)).body.name, 'New Co');
 
   assert.deepEqual((await call('GET', '/api/me', null, adminTok)).body.roles, ['Admin']);
-  assert.deepEqual((await call('GET', '/api/me', null, user(N, 9))).body.roles, ['Contributor']);
-  const cfg = (await call('GET', '/api/config', null, user(N, 9))).body;
+  const cfg = (await call('GET', '/api/config', null, adminTok)).body;
   assert.equal(cfg.tenant.status, 'ready'); assert.equal(cfg.tenant.subscription, 'trial'); assert.equal(cfg.tenant.sharepoint, false);
+  assert.equal(cfg.tenant.licence.readOnly, false);
+  // The one seat is the admin's: a colleague is refused, even with an Entra app role.
+  assert.equal((await call('GET', '/api/config', null, user(N, 9))).body.tenant.status, 'no_seat');
+  const other = await call('GET', '/api/me', null, user(N, 9, { roles: ['ProcessDoc.Contributor'] }));
+  assert.equal(other.status, 402); assert.equal(other.body.code, 'SEAT_LIMIT');
+  const sub = (await call('GET', '/api/subscription', null, adminTok)).body;
+  assert.equal(sub.plan, 'trial'); assert.equal(sub.seats, 1); assert.equal(sub.seatsUsed, 1);
 });
 
 test('setup: default role and admins are changed by Admins only', async () => {

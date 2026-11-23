@@ -120,7 +120,8 @@ Step 'Multi-tenant web app registration'
 $spaName = "$AppDisplayName Web"
 $spa = Get-MgApplication -Filter "displayName eq '$spaName'" | Select-Object -First 1
 if (-not $spa) { $spa = New-MgApplication -DisplayName $spaName -SignInAudience AzureADMultipleOrgs; Ok "Created $spaName ($($spa.AppId))" } else { Ok "Found $spaName ($($spa.AppId))" }
-Update-MgApplication -ApplicationId $spa.Id -SignInAudience AzureADMultipleOrgs -Spa @{ RedirectUris = @($PublicUrl, "$PublicUrl/") } -Web @{ RedirectUris = @($callback) } -RequiredResourceAccess @(
+# /subscribe is the Microsoft Marketplace landing page; it signs in with an ID token of this app.
+Update-MgApplication -ApplicationId $spa.Id -SignInAudience AzureADMultipleOrgs -GroupMembershipClaims 'DirectoryRole' -Spa @{ RedirectUris = @($PublicUrl, "$PublicUrl/", "$PublicUrl/subscribe") } -Web @{ RedirectUris = @($callback) } -RequiredResourceAccess @(
   @{ ResourceAppId = $api.AppId; ResourceAccess = @(@{ Id = $scopeId; Type = 'Scope' }) }
 )
 if (-not (Get-MgServicePrincipal -Filter "appId eq '$($spa.AppId)'")) { New-MgServicePrincipal -AppId $spa.AppId | Out-Null }
@@ -139,6 +140,7 @@ $settings['ENTRA_API_CLIENT_ID'] = $api.AppId
 $settings['ENTRA_SPA_CLIENT_ID'] = $spa.AppId
 $settings['PDA_MI_CLIENT_ID'] = $ua.ClientId
 $settings['PDA_PUBLIC_URL'] = $PublicUrl
+$settings['PDA_PUBLISHER_TENANT_ID'] = $TenantId
 Set-AzWebApp -ResourceGroupName $ResourceGroup -Name $WebAppName -AppSettings $settings | Out-Null
 Restart-AzWebApp -ResourceGroupName $ResourceGroup -Name $WebAppName | Out-Null
 Ok 'Saved and restarted'
@@ -146,4 +148,9 @@ Ok 'Saved and restarted'
 Write-Host "`nNext:" -ForegroundColor Cyan
 Write-Host "  1. Publisher verification for '$apiName' and '$spaName' (Entra admin center → App registrations → Branding & properties)."
 Write-Host "  2. Try it with a second tenant (a Microsoft 365 developer tenant): open $PublicUrl/#/signup as its Global Administrator."
-Write-Host "  3. Optional: PDA_SELF_SIGNUP=false to allow only tenants you register with 'npm run tenant -- add'."
+Write-Host "  3. Partner Center → your SaaS offer → Technical configuration:"
+Write-Host "       Landing page URL:            $PublicUrl/subscribe"
+Write-Host "       Connection webhook:          $PublicUrl/api/marketplace/webhook"
+Write-Host "       Microsoft Entra tenant ID:   $TenantId"
+Write-Host "       Microsoft Entra application ID: $($api.AppId)"
+Write-Host "  4. Optional: PDA_SELF_SIGNUP=false to allow only tenants you register with 'npm run tenant -- add'."
