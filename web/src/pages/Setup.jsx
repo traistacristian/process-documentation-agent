@@ -14,7 +14,7 @@ export function Signup() {
       {err && <div className="alert err">Microsoft did not complete the consent ({err}). Sign in as a Global Administrator, Application Administrator or Cloud Application Administrator and try again.</div>}
       <ol className="steps-list">
         <li><b>Give consent.</b> As a Microsoft 365 administrator, approve the app for your organisation. Microsoft shows exactly which permissions it asks for: sign-in, access to only the SharePoint site you choose later, and Teams meeting transcripts that the signed-in person may read.</li>
-        <li><b>Start your free trial.</b> You become the first administrator of the app; everybody else in your organisation can record processes.</li>
+        <li><b>Start your free trial.</b> 5 days, for you as the administrator (1 seat). Subscribe to add your colleagues.</li>
         <li><b>Connect a SharePoint site.</b> Published documents are stored there, in your own tenant.</li>
       </ol>
       <a className="btn primary big" href="/api/onboarding/consent" data-testid="consent">Add to my organisation</a>
@@ -45,7 +45,9 @@ export default function Setup({ me }) {
   const cfg = getConfig();
   const [t, setT] = useState(null); const [err, setErr] = useState(null); const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
   const [sp, setSp] = useState({ siteUrl: '', libraryName: 'Documents', rootFolder: 'IT Process Documentation' });
+  const [sub, setSub] = useState(null);
   useEffect(() => { api('/api/onboarding').then((v) => { setT(v); if (v.sharepoint) setSp(v.sharepoint); }).catch((x) => setErr(x.message)); }, []);
+  useEffect(() => { api('/api/subscription').then(setSub).catch(() => {}); }, []);
   if (!cfg.multiTenant) return <div className="panel">This page is only used in the multi-tenant deployment.</div>;
   if (!me?.roles.includes('Admin')) return <div className="panel">Only administrators of the app can change the organisation setup.</div>;
   if (!t) return <div className="panel">{err ? <div className="alert err">{err}</div> : <div className="spinner" />}</div>;
@@ -65,6 +67,14 @@ export default function Setup({ me }) {
       <p className="muted">{t.name} · {t.status === 'trial' && t.trialEndsAt ? `Trial until ${new Date(t.trialEndsAt).toLocaleDateString()}` : `Subscription: ${t.status}`}</p>
       {err && <div className="alert err">{err}</div>}
       {msg && <div className="alert ok">{msg}</div>}
+
+      {sub && (
+        <div className="alert" data-testid="subscription">
+          <b>Plan: {sub.plan}</b>{sub.readOnly ? ` · read-only (${sub.reason === 'trial_ended' ? 'trial ended' : 'suspended'})` : ''}<br />
+          Seats this month: {sub.seatsUsed} of {sub.seats ?? 'unlimited'} · AI-drafted documents this month: {sub.aiUsed} of {sub.aiGenerations ?? 'unlimited'}
+          {sub.plan === 'trial' && <><br /><span className="small muted">The trial is for you only (1 seat) and lasts until {new Date(sub.trialEndsAt).toLocaleString()}. Subscribe to add your colleagues.</span></>}
+        </div>
+      )}
 
       <h2>1. Who can use the app</h2>
       <p className="small muted">Roles assigned to users or groups in your Entra ID (Enterprise applications → {cfg.appName || 'Process Documentation Agent API'} → Users and groups) always apply. Without such a role, people get the default role below.</p>

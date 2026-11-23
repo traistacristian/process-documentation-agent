@@ -17,6 +17,7 @@
 import express from 'express';
 import { ROLES } from './auth.js';
 import { SharePointRepository } from './repo/sharepoint.js';
+import { trialDays } from './licence.js';
 
 const err = (status, message, code) => Object.assign(new Error(message), { status, code });
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -116,8 +117,10 @@ export function mountOnboarding(app, { cfg, registry, userOf, bearer, connector,
     if (cfg.saas?.selfSignup === false) throw err(403, 'Sign-up is by invitation. Contact us to start a trial.', 'SIGNUP_CLOSED');
     if (!isDirectoryAdmin(user)) throw err(403, 'Only a Microsoft 365 administrator of your organisation can start the trial (Global, Application or Cloud Application Administrator).', 'NOT_DIRECTORY_ADMIN');
     const name = String(req.body?.name || '').trim().slice(0, 120) || user.email?.split('@')[1] || 'My organisation';
-    const days = Number(cfg.saas?.trialDays) || 30;
-    const t = registry.upsert(user.tenantId, { name, status: 'trial', plan: 'trial', trialEndsAt: Date.now() + days * 86400_000, admins: [user.id], defaultRole: ROLES.CONTRIBUTOR, signedUpBy: { id: user.id, name: user.name, email: user.email } });
+    // A self-service trial: at most 5 days and 1 seat, taken by the administrator who signs up.
+    // Nobody else gets a role by default; the default role is set once the organisation subscribes.
+    const t = registry.upsert(user.tenantId, { name, status: 'trial', plan: 'trial', trialEndsAt: Date.now() + trialDays(cfg) * 86400_000, admins: [user.id], defaultRole: '', signedUpBy: { id: user.id, name: user.name, email: user.email } });
+    registry.useSeat(t.id, user.id, 1);
     res.status(201).json(tenantView(t));
   }));
 

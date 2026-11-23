@@ -116,7 +116,7 @@ export function createApp(cfg, deps = {}) {
       // A tenant of the multi-tenant deployment signs in through the shared "organizations" endpoint.
       entra: cfg.auth.mode === 'entra' ? { tenantId: cfg.tenant ? 'organizations' : cfg.auth.entra.tenantId, clientId: cfg.auth.entra.spaClientId, scope: cfg.auth.entra.apiScope } : undefined,
       multiTenant: cfg.tenant ? true : undefined,
-      tenant: cfg.tenant ? { id: cfg.tenant.id, name: cfg.tenant.name, status: 'ready', subscription: cfg.tenant.status, trialEndsAt: cfg.tenant.trialEndsAt || null, sharepoint: cfg.repository.mode === 'sharepoint' } : undefined,
+      tenant: cfg.tenant ? { id: cfg.tenant.id, name: cfg.tenant.name, status: 'ready', subscription: cfg.tenant.status, trialEndsAt: cfg.tenant.trialEndsAt || null, sharepoint: cfg.repository.mode === 'sharepoint', licence: cfg.tenant.licence || null } : undefined,
       repository: { mode: cfg.repository.mode, label: repo.label },
       aiEngine: engineName(),
       meetings: meetingsAvailable(),
@@ -450,7 +450,10 @@ export function createApp(cfg, deps = {}) {
     const input = { cfg, meta: s.meta, events, screenshots: shots, screenshotsAvailable: new Set(shots.map((x) => x.id)), base: s.baseRef?.doc || null, user };
     let result;
     try {
-      const useAi = requested !== 'rules' && aiAvailable(cfg) && !aiOffFor(s.meta.category);
+      // Multi-tenant: over the plan's monthly AI quota, documents are drafted by the rule-based engine.
+      const useAi = requested !== 'rules' && aiAvailable(cfg) && !aiOffFor(s.meta.category) && !cfg.ai.quotaExceeded;
+      if (useAi) deps.onAiDraft?.();
+      else if (cfg.ai.quotaExceeded && aiAvailable(cfg)) audit.write(user, 'draft.ai_quota_exceeded', { draftId });
       try {
         result = useAi ? await generators.claude(input) : generators.rules(input);
       } catch (e) {

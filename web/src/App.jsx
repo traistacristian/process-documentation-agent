@@ -112,8 +112,10 @@ function TenantProblem({ tenant }) {
   return (
     <main><div className="panel" style={{ maxWidth: 520, margin: '80px auto', textAlign: 'center', padding: 36 }} data-testid="tenant-problem">
       <span className="logo-mark">P</span>
-      <h1 style={{ marginTop: 14 }}>{tenant.status === 'ended' ? 'Your subscription has ended' : 'Your organisation has not set up the app yet'}</h1>
-      <p className="muted">{tenant.status === 'ended'
+      <h1 style={{ marginTop: 14 }}>{tenant.status === 'ended' ? 'Your subscription has ended' : tenant.status === 'no_seat' ? 'No free seat this month' : 'Your organisation has not set up the app yet'}</h1>
+      <p className="muted">{tenant.status === 'no_seat'
+        ? `All ${tenant.seats} seat${tenant.seats === 1 ? '' : 's'} of ${tenant.name || 'your organisation'}'s subscription ${tenant.seats === 1 ? 'is' : 'are'} in use this month. Ask your administrator to add seats.`
+        : tenant.status === 'ended'
         ? 'Ask your Microsoft 365 administrator to renew the subscription. Documents already published stay in your SharePoint.'
         : <>Ask your Microsoft 365 administrator to add the Process Documentation Agent to your organisation. Administrators start here: <a href="#/signup">add to my organisation</a>.</>}</p>
       <p className="small muted">Organisation (tenant) ID: <code>{tenant.id}</code></p>
@@ -218,6 +220,8 @@ export default function App() {
         <AccountMenu me={me} />
       </header>
       <main>
+        {cfg.tenant?.licence?.readOnly && <div className="alert err" data-testid="licence-banner">{cfg.tenant.licence.reason === 'trial_ended' ? 'The trial has ended.' : 'The subscription is suspended.'} You can still read, download and delete; recording and publishing are paused until {me?.roles.includes('Admin') ? <a href="#/setup">your organisation subscribes</a> : 'your administrator renews it'}.</div>}
+        {cfg.tenant?.licence?.plan === 'trial' && !cfg.tenant.licence.readOnly && cfg.tenant.licence.trialEndsAt && <div className="alert warn small" data-testid="trial-banner">Trial until {new Date(cfg.tenant.licence.trialEndsAt).toLocaleString()} (1 seat).</div>}
         {cfg.multiTenant && me?.roles.includes('Admin') && !cfg.tenant?.sharepoint && page !== 'setup' && <div className="alert warn" data-testid="setup-banner">Published documents are kept in a temporary folder until a SharePoint site is connected. <a href="#/setup">Finish the organisation setup</a>.</div>}
         {page && <BackBar page={page} id={id} />}{view}
       </main>
