@@ -29,6 +29,7 @@ import { transcribeAudio, findMeetingSuggestions, nearestFrame, speechConfigured
 import { applyAnswer } from './engine/clarify.js';
 import { teamsEnabled, createTeamsGraph, parseVtt, planFromTranscript, teamsPackage, teamsManifest, maskSpokenSecrets } from './teams.js';
 import { redactText } from './engine/redact.js';
+import { extractDocument, documentEvents, videoEvents } from './engine/extract.js';
 import { renderDocx, renderMarkdown } from './engine/render.js';
 import { createRepository } from './repo/index.js';
 import { applyRetention } from './retention.js';
@@ -121,6 +122,7 @@ export function createApp(cfg, deps = {}) {
       aiEngine: engineName(),
       meetings: meetingsAvailable(),
       teams: teamsAvailable(),
+      uploads: { transcription: transcriptionAvailable(), maxDocumentMb: uploadLimits().maxDocumentMb, maxFrames: uploadLimits().maxFrames, maxAudioMb: uploadLimits().maxAudioMb },
       categories: cfg.categories,
       aiOffCategories: cfg.aiPolicy?.offCategories || [],
     });
@@ -198,6 +200,8 @@ export function createApp(cfg, deps = {}) {
   const teamsGraph = deps.teamsGraph || (teamsEnabled(cfg) ? createTeamsGraph(cfg) : null);
   const teamsPlan = deps.planFromTranscript || planFromTranscript;
   const teamsAvailable = () => !!teamsGraph && (!!deps.planFromTranscript || aiAvailable(cfg));
+  const transcriptionAvailable = () => !!deps.transcribeAudio || speechConfigured(cfg);
+  const uploadLimits = () => ({ maxDocumentMb: 50, maxImages: 40, maxFrames: 60, maxAudioMb: 200, ...(cfg.uploads || {}) });
   const meetingsAvailable = () => (!!deps.transcribeAudio || speechConfigured(cfg)) && (!!deps.findMeetingSuggestions || aiAvailable(cfg));
   // AI per category: an admin can switch the AI off for sensitive categories. Nothing about a
   // process in such a category (screenshots, events, text, transcripts) is then sent to the AI; the
@@ -478,7 +482,9 @@ export function createApp(cfg, deps = {}) {
         doc.changeHistory = s.baseRef.doc.changeHistory;
         draft.comparison = compareDocs(s.baseRef.doc, doc);
       }
-      Object.assign(draft, { doc, clarifications: result.clarifications, suggestions: result.suggestions, engine: result.engine, status: 'draft', updatedAt: Date.now() });
+      // Uploaded files: what could not be read (no transcription, skipped pictures…) is said first.
+      const notes = (store.get('sessions', s.id) || s).uploadNotes || [];
+      Object.assign(draft, { doc, clarifications: result.clarifications, suggestions: [...notes, ...result.suggestions], engine: result.engine, status: 'draft', updatedAt: Date.now() });
       store.put('drafts', draft);
       audit.write(user, 'draft.generated', { draftId, engine: result.engine, steps: doc.steps.length, clarifications: result.clarifications.length });
     } catch (e) {
@@ -873,6 +879,166 @@ export function createApp(cfg, deps = {}) {
     if (cfg.auth.mode !== 'entra' && !deps.teamsGraph) throw httpError(409, 'The Teams app needs Microsoft sign-in (Entra ID mode).');
     audit.write(req.user, 'teams.package_downloaded', {});
     res.attachment('process-documentation-agent-teams.zip').type('application/zip').send(await teamsPackage(cfg, teamsHost(req)));
+  }));
+
+  // ---------------------------------------------------------------- uploaded videos and documents
+  // A written work instruction, a slide deck, a PDF guide or a video that explains a process becomes
+  // a draft through the same engines, guardrails and review as a recording. Documents are read on the
+  // server (no service is used to read them) and the file itself is not kept: only its text, redacted
+  // like captured text, and its pictures, checked for personal data like screenshots. A video never
+  // leaves the browser: it sends the frames where the screen changes and the sound track, which Azure
+  // AI Speech transcribes (the sound is deleted afterwards), or a subtitle file instead.
+  const uploadDir = path.join(cfg.dataDir, 'uploads'); fs.mkdirSync(uploadDir, { recursive: true });
+  const uploadAudio = (sid) => path.join(uploadDir, `${sid}.wav`);
+  const loadUpload = (req) => {
+    const s = store.get('sessions', req.params.id);
+    if (!s || s.source !== 'upload' || s.createdBy.id !== req.user.id) throw httpError(404, 'Upload not found');
+    return s;
+  };
+  const openUpload = (req, kind) => {
+    const s = loadUpload(req);
+    if (s.status !== 'uploading') throw httpError(409, 'This upload is already finished');
+    if (kind && s.meta.source.kind !== kind) throw httpError(409, `This upload is a ${s.meta.source.kind}`);
+    return s;
+  };
+  const redactUploaded = (text) => maskSpokenSecrets(redactText(text, cfg.capture));
+  const uploadView = (s) => { const { captureTokenHash, subtitles, ...rest } = s; return { ...rest, subtitleLines: subtitles?.length || 0 }; };
+
+  function finishUpload(s, events, user) {
+    const clean = [...events, { type: 'stop', ts: Math.max(Date.now(), (events.at(-1)?.ts || 0) + 1000), source: 'upload' }]
+      .map((e) => sanitizeEvent(e, cfg.capture)).filter(Boolean)
+      .map((e) => { if (e.screenshotId && !store.screenshotPath(s.id, e.screenshotId)) delete e.screenshotId; return e; });
+    store.appendEvents(s.id, clean);
+    const label = `the uploaded ${s.meta.source.kind === 'video' ? 'video' : 'file'} "${s.meta.source.fileName}"`;
+    const draft = {
+      id: newId('drf'), sessionId: s.id, mode: s.mode, status: 'generating', engine: null, createdBy: s.createdBy, createdAt: Date.now(), updatedAt: Date.now(),
+      uploadedFrom: { kind: s.meta.source.kind, fileName: s.meta.source.fileName },
+      baseRef: s.baseRef ? { processId: s.baseRef.processId, version: s.baseRef.version, etag: s.baseRef.etag } : null,
+      baseDoc: s.baseRef?.doc || null, doc: null, clarifications: [], suggestions: [], comparison: null, decisions: {}, history: [{ ts: Date.now(), user: user.name, action: `drafted from ${label}` }],
+    };
+    store.put('drafts', draft);
+    const cur = store.get('sessions', s.id) || s;
+    Object.assign(cur, { status: 'generated', stoppedAt: Date.now(), draftId: draft.id, eventCount: store.readEvents(s.id).length, lastEventAt: Date.now() });
+    store.put('sessions', cur);
+    runGeneration(draft.id, cur, store.readEvents(s.id), user).catch(() => {});
+    return draft;
+  }
+
+  app.post('/api/uploads', requireRole(ROLES.CONTRIBUTOR), wrap(async (req, res) => {
+    const b = req.body || {};
+    const kind = b.kind === 'video' ? 'video' : 'document';
+    const fileName = cleanFileName(b.fileName);
+    if (!fileName) throw httpError(400, 'Choose a file');
+    if (b.consent !== true) throw httpError(400, 'Confirm that you may use this file and that it contains no passwords or other secrets');
+    let baseRef = null; let meta; const mode = b.processId ? 'update' : 'new';
+    if (mode === 'update') {
+      const p = await repo.get(String(b.processId));
+      if (!p) throw httpError(404, 'Process not found in the repository');
+      baseRef = { processId: p.doc.info.processId, version: p.doc.info.version, etag: p.etag, doc: p.doc };
+      meta = { title: p.doc.info.title, description: '', department: p.doc.info.department, owner: p.doc.info.owner, category: p.doc.info.category, language: p.doc.info.language || 'en' };
+    } else {
+      const title = String(b.title || '').trim() || fileName.replace(/\.[a-z0-9]{1,8}$/i, '').replace(/[_]+/g, ' ').trim();
+      if (!cleanFileName(title)) throw httpError(400, 'The process name must contain letters or digits');
+      meta = { title: title.slice(0, 200), description: String(b.description || '').slice(0, 2000), department: String(b.department || '').slice(0, 200), owner: String(b.owner || '').slice(0, 200), category: cfg.categories.includes(b.category) ? b.category : (b.category ? String(b.category).slice(0, 100) : ''), language: b.language === 'de' ? 'de' : 'en', fileName: cleanFileName(title) };
+    }
+    meta.source = { kind, fileName, type: kind === 'video' ? 'video' : null };
+    const s = {
+      id: newId('ses'), mode, meta, baseRef, status: 'uploading', source: 'upload', titleFromFile: mode === 'new' && !String(b.title || '').trim(),
+      createdBy: { id: req.user.id, name: req.user.name }, startedAt: Date.now(), stoppedAt: null, pausedMs: 0, pausedAt: null, eventCount: 0, clients: [],
+      frames: [], audioBytes: 0, uploadNotes: [],
+      consent: { acceptedAt: Date.now(), text: `Drafted from ${kind === 'video' ? 'a video' : 'a file'} uploaded by ${req.user.name}, who confirmed that they may use it and that it contains no passwords or other secrets.` },
+    };
+    store.put('sessions', s);
+    store.appendEvents(s.id, [{ type: 'start', ts: s.startedAt, source: 'upload' }]);
+    audit.write(req.user, 'upload.started', { sessionId: s.id, kind, fileName, mode, processId: baseRef?.processId });
+    res.status(201).json(uploadView(s));
+  }));
+  app.get('/api/uploads/:id', wrap(async (req, res) => res.json(uploadView(loadUpload(req)))));
+
+  // A document: read, turned into events, and drafted right away.
+  app.post('/api/uploads/:id/document', express.raw({ type: () => true, limit: `${uploadLimits().maxDocumentMb}mb` }), wrap(async (req, res) => {
+    const s = openUpload(req, 'document');
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const maxImages = Math.min(uploadLimits().maxImages, cfg.capture.maxScreenshotsPerSession);
+    const x = await extractDocument({ buf, fileName: s.meta.source.fileName, maxImages });
+    let saved = 0; let skipped = 0;
+    const blocks = x.blocks.map((b) => (b.type === 'image' ? b : { ...b, text: redactUploaded(b.text) }));
+    const events = documentEvents(blocks, {
+      t0: s.startedAt, title: x.title || s.meta.title,
+      saveImage: (b) => { if (saved >= maxImages) { skipped++; return null; } const r = store.saveScreenshot(s.id, b.image.buf, b.image.mime); protectShot(s.id, r.id); saved++; return r.id; },
+    });
+    s.meta.source.type = x.type;
+    if (s.titleFromFile && x.title && cleanFileName(x.title)) { s.meta.title = x.title.slice(0, 200); s.meta.fileName = cleanFileName(x.title); }
+    s.uploadNotes = [...x.warnings, ...(skipped ? [`${skipped} more picture(s) from the file were not used (limit ${maxImages}).`] : [])];
+    store.put('sessions', s);
+    audit.write(req.user, 'upload.document_read', { sessionId: s.id, type: x.type, bytes: buf.length, blocks: x.blocks.length, pictures: saved });
+    res.status(202).json(finishUpload(s, events, req.user));
+  }));
+
+  // A video, sent by the browser in parts: frames, the sound track (16 kHz WAV) and/or subtitles.
+  app.post('/api/uploads/:id/frames', wrap(async (req, res) => {
+    const s = openUpload(req, 'video');
+    if (s.frames.length >= Math.min(uploadLimits().maxFrames, cfg.capture.maxScreenshotsPerSession)) throw httpError(429, 'Screenshot limit for this video reached');
+    const x = /^data:(image\/(?:jpeg|png));base64,(.+)$/.exec(req.body?.data || '');
+    if (!x) throw httpError(400, 'Expected a data URL with a JPEG or PNG image');
+    const buf = Buffer.from(x[2], 'base64');
+    if (buf.length > 8 * 1024 * 1024) throw httpError(413, 'Screenshot too large');
+    const saved = store.saveScreenshot(s.id, buf, x[1]);
+    protectShot(s.id, saved.id);
+    s.frames.push({ id: saved.id, atMs: Math.max(0, Math.round(Number(req.body.atMs) || 0)) });
+    store.put('sessions', s);
+    res.json({ id: saved.id, frames: s.frames.length });
+  }));
+  app.post('/api/uploads/:id/audio', express.raw({ type: () => true, limit: '25mb' }), wrap(async (req, res) => {
+    const s = openUpload(req, 'video');
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (s.audioBytes + buf.length > uploadLimits().maxAudioMb * 1024 * 1024) throw httpError(413, 'The sound track of this video is too long');
+    fs.appendFileSync(uploadAudio(s.id), buf);
+    s.audioBytes += buf.length; store.put('sessions', s);
+    res.json({ audioBytes: s.audioBytes });
+  }));
+  app.post('/api/uploads/:id/subtitles', express.raw({ type: () => true, limit: '5mb' }), wrap(async (req, res) => {
+    const s = openUpload(req, 'video');
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const name = String(req.query.fileName || 'subtitles.vtt');
+    const x = await extractDocument({ buf, fileName: name, maxImages: 0 });
+    if (!['vtt', 'srt'].includes(x.type)) throw httpError(422, 'Subtitles must be a WebVTT (.vtt) or SubRip (.srt) file');
+    s.subtitles = x.blocks.map((b) => ({ ms: b.ms || 0, speaker: null, text: redactUploaded(b.said ?? b.text) })); // names of speakers are not kept
+    store.put('sessions', s);
+    res.json(uploadView(s));
+  }));
+  app.post('/api/uploads/:id/finish', wrap(async (req, res) => {
+    const s = openUpload(req, 'video');
+    const hasAudio = s.audioBytes > 0 && fs.existsSync(uploadAudio(s.id));
+    if (!s.frames.length && !hasAudio && !s.subtitles?.length) throw httpError(422, 'Nothing was taken from the video yet');
+    s.status = 'processing'; store.put('sessions', s);
+    audit.write(req.user, 'upload.video_sent', { sessionId: s.id, frames: s.frames.length, audioBytes: s.audioBytes, subtitles: s.subtitles?.length || 0 });
+    res.status(202).json(uploadView(s));
+    // In the background: transcribe, then draft.
+    (async () => {
+      const notes = [];
+      let transcript = s.subtitles || [];
+      try {
+        if (!transcript.length && hasAudio) {
+          if (aiOffFor(s.meta.category)) notes.push(`The sound track was not transcribed: ${aiOffMessage(s.meta.category)} Upload a subtitle file (.vtt or .srt) with the video to include what is said.`);
+          else if (!transcriptionAvailable()) notes.push('The sound track was not transcribed because Azure AI Speech is not set up; the draft is based on the screenshots only. Upload a subtitle file (.vtt or .srt) with the video to include what is said.');
+          else {
+            try {
+              transcript = (await transcribe({ cfg, path: uploadAudio(s.id), mime: 'audio/wav', fileName: 'video.wav', language: s.meta.language })).map((l) => ({ ...l, text: redactUploaded(l.text) }));
+              if (!transcript.length) notes.push('Nothing was said in the video (or the speech could not be recognised); the draft is based on the screenshots only.');
+            } catch (e) { notes.push(`The sound track could not be transcribed (${e.message}); the draft is based on the screenshots only.`); audit.write(null, 'upload.transcription_failed', { sessionId: s.id, error: e.message }); }
+          }
+        }
+      } finally { fs.rmSync(uploadAudio(s.id), { force: true }); } // privacy: only the transcript is kept
+      const cur = store.get('sessions', s.id);
+      cur.uploadNotes = notes; cur.transcriptLines = transcript.length; delete cur.subtitles; store.put('sessions', cur);
+      const draft = finishUpload(cur, videoEvents({ transcript, frames: cur.frames, t0: cur.startedAt }), req.user);
+      audit.write(req.user, 'upload.video_read', { sessionId: s.id, draftId: draft.id, frames: cur.frames.length, transcriptLines: transcript.length });
+    })().catch((e) => {
+      const cur = store.get('sessions', s.id);
+      if (cur) { cur.status = 'failed'; cur.error = e.message; store.put('sessions', cur); }
+      audit.write(null, 'upload.failed', { sessionId: s.id, error: e.message });
+    });
   }));
 
   app.post('/api/drafts/:id/approve', requireRole(ROLES.APPROVER), wrap(async (req, res) => {

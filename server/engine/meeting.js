@@ -17,7 +17,7 @@ const LOCALES = { en: 'en-US', de: 'de-DE' };
 export const speechConfigured = (cfg) => !!cfg.speech?.endpoint;
 
 // Returns [{ ms, durationMs, speaker, text }].
-export async function transcribeAudio({ cfg, path, mime = 'audio/webm', language = 'en', credential, fetchImpl = globalThis.fetch }) {
+export async function transcribeAudio({ cfg, path, mime = 'audio/webm', fileName = 'meeting.webm', language = 'en', credential, fetchImpl = globalThis.fetch }) {
   const endpoint = cfg.speech.endpoint.replace(/\/+$/, '');
   const headers = {};
   if (cfg.speech.key) headers['Ocp-Apim-Subscription-Key'] = cfg.speech.key;
@@ -28,7 +28,7 @@ export async function transcribeAudio({ cfg, path, mime = 'audio/webm', language
     headers.authorization = `Bearer ${t.token}`;
   }
   const form = new FormData();
-  form.append('audio', new Blob([fs.readFileSync(path)], { type: mime }), 'meeting.webm');
+  form.append('audio', new Blob([fs.readFileSync(path)], { type: mime }), fileName);
   const primary = LOCALES[language] || 'en-US';
   form.append('definition', JSON.stringify({ locales: [primary, ...Object.values(LOCALES).filter((l) => l !== primary)], diarization: { enabled: true, maxSpeakers: 8 }, profanityFilterMode: 'None' }));
   const res = await fetchImpl(`${endpoint}/speechtotext/transcriptions:transcribe?api-version=2024-11-15`, { method: 'POST', headers, body: form });

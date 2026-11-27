@@ -16,13 +16,20 @@ How to work:
 9. When an existing approved document is provided, this is an update. Reuse the existing wording, step titles and terminology for every step that was performed the same way, so that the comparison shows only real changes. Keep existing purpose, scope, roles, prerequisites and troubleshooting unless the new recording contradicts them; raise a clarification when it does.
 10. Set important to true for every step the employee marked as important, and for steps where a mistake is costly or hard to undo: deleting, removing, resetting, blocking or disabling something, granting or revoking permissions or admin roles, and checks that must pass before continuing (such as verifying the caller's identity or an approval). Leave it false for routine navigation and data entry, so the highlight stays meaningful.
 11. Give 6 to 12 search keywords: the words a colleague would type to find this procedure - the systems used, the objects handled (user, licence, mailbox, group…), the action (create, reset, offboard…), common synonyms and abbreviations (MFA, M365, AAD / Entra ID). No full sentences, no personal data. When updating an existing document, keep its keywords and add new ones only where the process changed.
-12. Write the whole document in the language named in <document_language> (British English or German). Keep the names of menus, buttons and fields exactly as captured, even when they are in another language.`;
+12. Write the whole document in the language named in <document_language> (British English or German). Keep the names of menus, buttons and fields exactly as captured, even when they are in another language.
+13. When <evidence_source> says the evidence comes from an uploaded file or video instead of a live recording, the note events are the text of that file in reading order (for a video: what was said, with the time it was said), mark events are its headings or list items, and screenshot events are its pictures or the frames of the video at that moment. Steps the file describes count as performed: cite the note and mark events they come from as evidence. Take purpose, scope, prerequisites, roles and exceptions from the file only where it states them. Spoken explanations are informal: turn them into clear instructions, and ignore filler, small talk and repetitions. Never copy names, e-mail addresses or other personal data of the people in the file into the document.`;
 
 export function buildUserPrompt({ meta, candidateSteps, events, screenshots, base }) {
   const lines = [];
   lines.push('<process_information>');
   lines.push(JSON.stringify({ title: meta.title, description: meta.description || '', department: meta.department || '', owner: meta.owner || '', category: meta.category || '' }, null, 2));
   lines.push('</process_information>');
+  if (meta.source) {
+    const what = meta.source.kind === 'video'
+      ? `a video ("${meta.source.fileName}") explaining or showing the process: the notes are its transcript, the screenshots are frames taken when the screen changed`
+      : `an uploaded ${meta.source.type || 'document'} file ("${meta.source.fileName}") that describes the process`;
+    lines.push(`<evidence_source>Not a live recording: the events were extracted from ${what}.</evidence_source>`);
+  }
   lines.push(`<document_language>${meta.language === 'de' ? 'German (Deutsch)' : 'British English'}</document_language>`);
   if (base) {
     lines.push('<existing_approved_document>');
