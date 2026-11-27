@@ -4,6 +4,7 @@ import { api, getConfig, devUser, setDevUser, signOut, isSignedOut, signIn, inTe
 import { usePoll } from './util.jsx';
 import Landing from './pages/Landing.jsx';
 import NewProcess from './pages/NewProcess.jsx';
+import Upload from './pages/Upload.jsx';
 import UpdateProcess from './pages/UpdateProcess.jsx';
 import Recorder from './pages/Recorder.jsx';
 import Review from './pages/Review.jsx';
@@ -144,7 +145,7 @@ function parentOf(page, id) {
   return '#/';
 }
 
-const PAGE_NAMES = { new: 'Record a new process', update: 'Update a process', record: 'Recording', review: 'Review the draft', library: 'Process library', admin: 'Administration', help: 'Help', meeting: 'Meeting recording', teams: 'From a Teams meeting', setup: 'Organisation setup' };
+const PAGE_NAMES = { new: 'Record a new process', upload: 'From a video or document', update: 'Update a process', record: 'Recording', review: 'Review the draft', library: 'Process library', admin: 'Administration', help: 'Help', meeting: 'Meeting recording', teams: 'From a Teams meeting', setup: 'Organisation setup' };
 
 function BackBar({ page, id }) {
   const back = () => { if (visited.length > 1) history.back(); else location.hash = parentOf(page, id); };
@@ -179,6 +180,7 @@ export default function App() {
   let view;
   if (!page) view = <Landing me={me} />;
   else if (page === 'new') view = <NewProcess me={me} />;
+  else if (page === 'upload') view = <Upload me={me} />;
   else if (page === 'update') view = <UpdateProcess me={me} processId={id} />;
   else if (page === 'record') view = <Recorder id={id} />;
   else if (page === 'review') view = <Review id={id} me={me} />;

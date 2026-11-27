@@ -27,7 +27,8 @@ export default function UpdateProcess({ processId }) {
           <p>Perform the process the way it is done <b>now</b>, including any changed or additional steps. The agent will compare your execution with the current documentation and show you every difference before anything is changed. The current version stays in the repository until you approve and publish the update.</p>
           {err && <div className="alert err">{err}</div>}
           <Consent checked={consent} onChange={setConsent} />
-          <div className="row" style={{ marginTop: 16 }}><button className="btn danger big" disabled={!consent || busy} onClick={start} data-testid="start">● Start Recording</button></div>
+          <div className="row" style={{ marginTop: 16 }}><button className="btn danger big" disabled={!consent || busy} onClick={start} data-testid="start">● Start Recording</button>
+            <a className="btn big outline" href={`#/upload?processId=${encodeURIComponent(processId)}`} data-testid="update-from-file">⇪ Update from a video or document</a></div>
         </div>
         <div className="panel"><h2>Current documentation (version {sel.doc.info.version})</h2>
           <DocPreview doc={sel.doc} shotUrl={(id) => `/api/processes/${processId}/screenshots/${id}`} />

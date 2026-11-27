@@ -17,7 +17,7 @@ export default function Review({ id, me }) {
   useEffect(() => { if (d?.mode === 'update') setTab('changes'); }, [d?.mode]);
 
   if (!d) return err ? <div className="alert err">{err}</div> : <span className="spinner" />;
-  if (d.status === 'generating') return <div className="panel" style={{ textAlign: 'center', padding: 40 }}><span className="spinner" /><h2 style={{ marginTop: 12 }}>Analysing the recording and writing the documentation…</h2><p className="muted">The agent groups your actions into steps, identifies inputs, results and errors, and prepares questions where information is missing.</p></div>;
+  if (d.status === 'generating') return <div className="panel" style={{ textAlign: 'center', padding: 40 }}><span className="spinner" /><h2 style={{ marginTop: 12 }}>{d.uploadedFrom ? `Reading the ${d.uploadedFrom.kind === 'video' ? 'video' : 'file'} and writing the documentation…` : 'Analysing the recording and writing the documentation…'}</h2><p className="muted">The agent groups your actions into steps, identifies inputs, results and errors, and prepares questions where information is missing.</p></div>;
   if (d.status === 'failed') return <div className="alert err">Documentation could not be generated: {d.error}</div>;
 
   const editable = ['draft', 'rejected'].includes(d.status);
@@ -52,7 +52,9 @@ export default function Review({ id, me }) {
           <div>
             <h1 style={{ marginBottom: 4 }}>{doc.info.title}</h1>
             <div className="row small muted"><StatusBadge s={d.status} /><span>{d.mode === 'update' ? `Update of ${d.baseRef.processId} (current v${d.baseRef.version})` : `New process ${doc.info.processId}`}</span>
-              <span>· recorded by {d.createdBy.name}</span><span>· {d.engine === 'rules' ? 'drafted automatically from the recording' : 'drafted by AI from the recording'}</span>{aiOff && <span className="badge rejected" data-testid="ai-off-badge" title="An administrator switched the AI off for this category">🔒 AI off · {doc.info.category}</span>}</div>
+              {d.uploadedFrom
+                ? <><span>· uploaded by {d.createdBy.name}</span><span data-testid="uploaded-from">· {d.engine === 'rules' ? 'drafted automatically' : 'drafted by AI'} from the {d.uploadedFrom.kind === 'video' ? 'video' : 'file'} "{d.uploadedFrom.fileName}"</span></>
+                : <><span>· recorded by {d.createdBy.name}</span><span>· {d.engine === 'rules' ? 'drafted automatically from the recording' : 'drafted by AI from the recording'}</span></>}{aiOff && <span className="badge rejected" data-testid="ai-off-badge" title="An administrator switched the AI off for this category">🔒 AI off · {doc.info.category}</span>}</div>
           </div>
           <div className="row">{editable && cfg.meetings && !aiOff && <a className="btn" href={`#/meeting/${id}`} data-testid="fill-from-meeting" title="Record a meeting in which the process is explained; the agent suggests what to add">🎙 Fill gaps from a meeting</a>}
           {editable && doc.steps.some((st) => st.screenshotIds.length) && <button className="btn" disabled={busy || dirty} title={dirty ? 'Save your edits first' : 'Cut every step screenshot to the part that matters (around the numbered markers). Crops you made yourself are kept.'} onClick={() => call(() => api(`/api/drafts/${id}/auto-crop`, { method: 'POST', body: {} })).then((r) => r && setMsg(r.cropped ? `${r.cropped} screenshot(s) cropped to the relevant part. Click a screenshot to adjust.` : 'Nothing to crop: the screenshots are already cropped, or they have no markers to crop around.'))} data-testid="auto-crop-btn">✂ Crop screenshots</button>}

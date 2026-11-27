@@ -62,8 +62,15 @@ function stepTitle(seg, n) {
 
 const CRITICAL = /\b(delete|remove|reset|block|disable|deactivate|revoke|wipe|permanently|löschen|entfernen|zurücksetzen|sperren|deaktivieren|widerrufen)\b/i;
 
+// Uploaded videos and documents: the steps are what the file says, not recorded actions.
+const untimed = (t) => String(t).replace(/^\[\d\d:\d\d\]\s*(Speaker \d+:\s*)?/, '');
+const firstSentence = (t) => { const f = untimed(t).split(/(?<=[.!?])\s|\n/)[0].replace(/[.:]$/, '').trim(); return f.length <= 90 ? f : `${f.slice(0, 89).replace(/\s+\S*$/, '')}…`; };
+
 export function generateWithRules({ meta, events, screenshotsAvailable = new Set(), base = null, user }) {
-  const segs = segmentEvents(events);
+  let segs = segmentEvents(events);
+  const fromFile = !!meta.source;
+  // Text before the first step of an uploaded document (introduction, purpose…) is not a step.
+  const intro = fromFile && meta.source.kind !== 'video' && segs[0]?.reason === 'note' && !segs[0].events.length ? segs.shift().notes : [];
   const doc = base ? structuredClone(base) : emptyDoc();
   const now = new Date().toISOString();
   doc.info = {
@@ -86,9 +93,10 @@ export function generateWithRules({ meta, events, screenshotsAvailable = new Set
   doc.steps = segs.map((seg, i) => {
     const s = emptyStep(i + 1);
     s.id = `stp_${crypto.randomBytes(4).toString('hex')}`;
-    s.title = stepTitle(seg, i + 1);
+    s.title = fromFile && seg.reason === 'screen' && seg.notes.length ? firstSentence(seg.notes[0]) : stepTitle(seg, i + 1);
     s.application = applicationName(seg.location);
-    systems.add(s.application);
+    if (fromFile && s.application === 'Unknown application') s.application = '';
+    if (s.application) systems.add(s.application);
     s.important = seg.important;
     s.notes = seg.notes.filter(Boolean);
     s.evidenceEventSeqs = seg.events.map((e) => e.seq).filter(Number.isFinite);
@@ -101,6 +109,18 @@ export function generateWithRules({ meta, events, screenshotsAvailable = new Set
     }
     if (!seg.events.some((e) => e.type === 'navigate' || e.type === 'window_focus') && i === 0 && (seg.location?.url || seg.location?.windowTitle)) {
       instr.unshift(`Open ${q(pageName(seg.location))} in ${s.application}.`);
+    }
+    // From a file: the text of the step is its instructions (headings of context sections stay notes).
+    if (fromFile && !instr.length && s.notes.length) {
+      for (const n of s.notes.filter((x) => !/:$/.test(x)).map(untimed)) {
+        const field = /^(expected result|result|erwartetes ergebnis|ergebnis|application \/ system|application|system|anwendung \/ system|anwendung|required input|input|eingabe)\s*:\s*(.+)$/i.exec(n);
+        if (field && /result|ergebnis/i.test(field[1])) s.fileResult = field[2];
+        else if (field && /input|eingabe/i.test(field[1])) s.input = field[2];
+        else if (field) s.application = field[2].slice(0, 200);
+        else instr.push(n.replace(/^\s*(\d+[.)]|[-•*▪●◦])\s+/, ''));
+      }
+      if (s.application) systems.add(s.application);
+      s.notes = s.notes.filter((n) => /:$/.test(n));
     }
     s.instructions = instr;
     // Highlight steps where a mistake is costly or hard to undo, besides the ones marked while recording.
@@ -115,12 +135,13 @@ export function generateWithRules({ meta, events, screenshotsAvailable = new Set
     if (ok?.text) results.push(`The confirmation ${q(ok.text)} is displayed.`);
     if (trailingNav) results.push(`The ${q(pageName(trailingNav))} screen is shown.`);
     else if (!ok?.text && nextSeg) results.push(`The ${q(pageName(nextSeg.location))} screen is shown.`);
-    s.expectedResult = results.join(' ');
-    s.description = s.instructions.length ? `Performed in ${s.application} on the ${q(pageName(seg.location))} screen.` : '';
+    s.expectedResult = fromFile ? s.fileResult || '' : results.join(' ');
+    delete s.fileResult;
+    s.description = s.instructions.length && !fromFile ? `Performed in ${s.application} on the ${q(pageName(seg.location))} screen.` : '';
     const shots = seg.events.map((e) => e.screenshotId).filter((id) => id && screenshotsAvailable.has(id));
     s.screenshotIds = [...new Set(shots)].slice(0, seg.important ? 3 : 1);
     if (!s.screenshotIds.length && screenshotsAvailable.size) s.warnings.push('No screenshot was captured for this step.');
-    if (seg.reason === 'screen') ask('steps', `Step ${i + 1} was captured with screen sharing only, so the clicks are not known. What is done on this screen? (Rename the step and add the instructions.)`, s.id);
+    if (seg.reason === 'screen' && !(fromFile && s.instructions.length)) ask('steps', `Step ${i + 1} was captured with screen sharing only, so the clicks are not known. What is done on this screen? (Rename the step and add the instructions.)`, s.id);
     else if (!s.instructions.length) ask('steps', `Step ${i + 1} ("${s.title}") has no recognised actions. What is done in this step?`, s.id);
     if (seg.events.some((e) => e.type === 'input' && isPlaceholderValue(e.value) && !e.sensitive)) {
       ask('steps', `Step ${i + 1}: what value or format should be entered (${s.input || 'field'})? The typed value was not recorded for privacy reasons.`, s.id);
@@ -146,11 +167,15 @@ export function generateWithRules({ meta, events, screenshotsAvailable = new Set
   } else {
     for (const s of systems) if (!doc.prerequisites.systems.includes(s)) doc.prerequisites.systems.push(s);
   }
-  if (!doc.steps.length) ask('steps', 'No process steps could be recognised from the recording. Was the capture component connected?');
+  if (!doc.steps.length && fromFile) ask('steps', 'No process steps could be recognised in the uploaded file. Which steps does the process have?');
+  else if (!doc.steps.length) ask('steps', 'No process steps could be recognised from the recording. Was the capture component connected?');
 
   const suggestions = [];
+  if (fromFile) suggestions.push(`This draft was made from the uploaded ${meta.source.kind === 'video' ? 'video' : 'file'} "${meta.source.fileName}". Check that every step says what is really done, in the right order.`);
+  if (intro.length) suggestions.push(`The file starts with an introduction: "${intro.join(' ').slice(0, 400)}${intro.join(' ').length > 400 ? '…' : ''}". Move what belongs into the purpose, scope or prerequisites.`);
   const unshot = doc.steps.filter((s) => !s.screenshotIds.length).length;
-  if (unshot) suggestions.push(`${unshot} step(s) have no screenshot. Consider re-recording with screen capture enabled or attaching images.`);
+  if (unshot && fromFile && screenshotsAvailable.size) suggestions.push(`${unshot} step(s) have no picture from the file. Add a screenshot on the review page where it helps.`);
+  else if (unshot && !fromFile) suggestions.push(`${unshot} step(s) have no screenshot. Consider re-recording with screen capture enabled or attaching images.`);
   if (doc.steps.length > 15) suggestions.push('This process has many steps; consider splitting it into sub-processes.');
 
   doc.keywords = normalizeKeywords([...(doc.keywords || []), ...extractKeywords(doc)]).slice(0, Math.max(12, (doc.keywords || []).length));
